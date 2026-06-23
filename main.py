@@ -26,7 +26,7 @@ class MainWindow(QMainWindow):
         self.current_data = None
         self.current_index = 0
         self.current_position_ms = None
-        self.full_data = None  # Полные данные без обрезки
+        self.full_data = None
         
         # Демо-торговля
         self.balance = 10000.0
@@ -211,15 +211,12 @@ class MainWindow(QMainWindow):
         self.timer.timeout.connect(self.play_step)
         
     def get_speed_ms(self) -> int:
-        """Возвращает задержку в мс для текущей скорости"""
         speed_text = self.speed_combo.currentText()
         speed = float(speed_text.replace('x', ''))
-        # Базовая скорость: 100 мс на свечу при 1x
         base_ms = 100
         return int(base_ms / speed)
     
     def load_data(self, symbol: str, force_refresh: bool = False):
-        """Загружает данные для актива"""
         self.status_label.setText(f"⏳ Загрузка {symbol}...")
         self.btn_refresh.setEnabled(False)
         
@@ -241,23 +238,26 @@ class MainWindow(QMainWindow):
             else:
                 self.aggregator = self.data_cache[symbol]
             
-            # Агрегируем текущий ТФ
             self.full_data = self.aggregator.aggregate(self.current_tf)
             
             if self.full_data.empty:
                 QMessageBox.warning(self, "Ошибка", f"Нет данных для {self.current_tf}")
                 return
             
-            # Сбрасываем позицию в начало
-            self.current_index = 0
+            # --- ИСПРАВЛЕНИЕ: Показываем последние 300 свечей при старте ---
+            total_bars = len(self.full_data)
+            if total_bars > 300:
+                self.current_index = total_bars - 300
+            else:
+                self.current_index = 0
+            
             self.current_position_ms = None
             
-            # Обновляем интерфейс
             self.update_slider()
             self.update_chart()
             self.update_info()
             
-            self.status_label.setText(f"✅ {symbol} {self.current_tf} - {len(self.full_data)} свечей")
+            self.status_label.setText(f"✅ {symbol} {self.current_tf} - {total_bars} свечей")
             
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Ошибка загрузки данных: {e}")
@@ -266,32 +266,26 @@ class MainWindow(QMainWindow):
             self.btn_refresh.setEnabled(True)
     
     def get_trimmed_data(self):
-        """Возвращает данные до текущего индекса (обрезанные)"""
         if self.full_data is None or self.full_data.empty:
             return pd.DataFrame()
         
         if self.current_index >= len(self.full_data):
             self.current_index = len(self.full_data) - 1
         
-        # Обрезаем до current_index (включая текущую свечу)
         trimmed = self.full_data.iloc[:self.current_index + 1].copy()
         return trimmed
     
     def update_chart(self):
-        """Обновляет график обрезанными данными"""
         trimmed = self.get_trimmed_data()
         if trimmed.empty:
             return
         
-        # Отправляем обрезанные данные в график
         self.chart.set_data(trimmed)
         
-        # Показываем последние свечи (автоскролл)
         if len(trimmed) > 0:
             self.chart.show_last_bars(300)
     
     def update_slider(self):
-        """Обновляет слайдер"""
         if self.full_data is not None and not self.full_data.empty:
             max_val = len(self.full_data) - 1
             self.time_slider.setMaximum(max(0, max_val))
@@ -299,7 +293,6 @@ class MainWindow(QMainWindow):
             self.update_time_label()
     
     def update_time_label(self):
-        """Обновляет метку времени и позицию"""
         if self.full_data is not None and not self.full_data.empty:
             max_idx = len(self.full_data) - 1
             idx = min(self.current_index, max_idx)
@@ -309,14 +302,12 @@ class MainWindow(QMainWindow):
             self.position_label.setText(f"{idx + 1} / {max_idx + 1}")
     
     def update_info(self):
-        """Обновляет информационную панель"""
         if self.full_data is not None and not self.full_data.empty:
             start = self.full_data.iloc[0]['time'].strftime('%Y-%m-%d')
             end = self.full_data.iloc[-1]['time'].strftime('%Y-%m-%d')
             self.data_info_label.setText(f"Свечей: {len(self.full_data)} | {start} → {end}")
     
     def update_balance_display(self):
-        """Обновляет отображение баланса"""
         pnl = self.balance - 10000
         color = "green" if pnl >= 0 else "red"
         
@@ -325,7 +316,6 @@ class MainWindow(QMainWindow):
         self.pnl_label.setTextFormat(Qt.RichText)
     
     def go_to_begin(self):
-        """Перейти в начало истории"""
         if self.is_playing:
             self.on_stop()
         self.current_index = 0
@@ -334,7 +324,6 @@ class MainWindow(QMainWindow):
         self.update_time_label()
     
     def go_to_end(self):
-        """Перейти в конец истории"""
         if self.is_playing:
             self.on_stop()
         if self.full_data is not None and not self.full_data.empty:
@@ -344,7 +333,6 @@ class MainWindow(QMainWindow):
             self.update_time_label()
     
     def on_asset_changed(self, symbol):
-        """Переключение актива"""
         if symbol != self.current_symbol:
             self.current_symbol = symbol
             self.current_position_ms = None
@@ -352,9 +340,7 @@ class MainWindow(QMainWindow):
             self.load_data(symbol)
     
     def on_tf_changed(self, tf):
-        """Переключение ТФ с сохранением позиции"""
         if tf != self.current_tf:
-            # Запоминаем текущее время в миллисекундах
             if self.full_data is not None and not self.full_data.empty:
                 idx = min(self.current_index, len(self.full_data) - 1)
                 dt = self.full_data.iloc[idx]['time']
@@ -370,12 +356,12 @@ class MainWindow(QMainWindow):
                     self.tf_combo.setCurrentText(self.current_tf)
                     return
                 
-                # Восстанавливаем позицию по времени
                 if self.current_position_ms is not None:
-                    # Ищем ближайшую свечу
                     self.current_index = self.find_nearest_index(self.current_position_ms)
                 else:
-                    self.current_index = 0
+                    # По умолчанию показываем последние 300
+                    total_bars = len(self.full_data)
+                    self.current_index = max(0, total_bars - 300)
                 
                 self.update_slider()
                 self.update_chart()
@@ -383,30 +369,22 @@ class MainWindow(QMainWindow):
                 self.status_label.setText(f"✅ {self.current_symbol} {tf} - {len(self.full_data)} свечей")
     
     def find_nearest_index(self, timestamp_ms: int) -> int:
-        """Находит индекс свечи, ближайшей по времени"""
         if self.full_data is None or self.full_data.empty:
             return 0
         
-        # Конвертируем время свечей в миллисекунды
         times_ms = self.full_data['time'].apply(lambda x: int(x.timestamp() * 1000))
-        
-        # Ищем ближайший
         idx = (times_ms - timestamp_ms).abs().idxmin()
         return int(idx)
     
     def on_speed_changed(self, speed_text):
-        """Изменение скорости воспроизведения"""
         if self.is_playing:
-            # Перезапускаем таймер с новой скоростью
             self.timer.stop()
             self.timer.start(self.get_speed_ms())
     
     def on_refresh(self):
-        """Принудительное обновление данных"""
         self.load_data(self.current_symbol, force_refresh=True)
     
     def on_slider_changed(self, value):
-        """Движение слайдера"""
         if self.full_data is None or self.full_data.empty:
             return
         
@@ -415,38 +393,32 @@ class MainWindow(QMainWindow):
         self.update_chart()
     
     def on_play(self):
-        """Запуск/пауза воспроизведения"""
         if self.full_data is None or self.full_data.empty:
             return
         
-        # Если достигли конца - начинаем сначала
         if self.current_index >= len(self.full_data) - 1:
-            self.current_index = 0
-            self.time_slider.setValue(0)
+            self.current_index = max(0, len(self.full_data) - 301)
+            self.time_slider.setValue(self.current_index)
             self.update_chart()
         
         if self.is_playing:
-            # Пауза
             self.is_playing = False
             self.timer.stop()
             self.btn_play.setText("▶ Play")
             self.status_label.setText("⏸ Пауза")
         else:
-            # Старт
             self.is_playing = True
             self.btn_play.setText("⏸ Пауза")
             self.timer.start(self.get_speed_ms())
             self.status_label.setText("▶ Воспроизведение...")
     
     def on_stop(self):
-        """Остановка воспроизведения"""
         self.is_playing = False
         self.timer.stop()
         self.btn_play.setText("▶ Play")
         self.status_label.setText("⏹ Остановлен")
     
     def on_step_back(self):
-        """Шаг назад"""
         if self.is_playing:
             return
         
@@ -457,7 +429,6 @@ class MainWindow(QMainWindow):
             self.update_time_label()
     
     def on_step_forward(self):
-        """Шаг вперед"""
         if self.is_playing:
             return
         
@@ -468,12 +439,10 @@ class MainWindow(QMainWindow):
             self.update_time_label()
     
     def play_step(self):
-        """Один шаг воспроизведения"""
         if self.full_data is None or self.full_data.empty:
             self.on_stop()
             return
         
-        # Переход к следующей свече
         if self.current_index >= len(self.full_data) - 1:
             self.on_stop()
             self.status_label.setText("✅ История закончилась")
@@ -482,10 +451,8 @@ class MainWindow(QMainWindow):
         
         self.current_index += 1
         self.time_slider.setValue(self.current_index)
-        # update_chart вызывается через on_slider_changed
     
     def closeEvent(self, event):
-        """Закрытие приложения"""
         self.on_stop()
         event.accept()
 
