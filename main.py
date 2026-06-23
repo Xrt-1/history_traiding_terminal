@@ -136,8 +136,7 @@ class MainWindow(QMainWindow):
                     symbol=symbol,
                     interval='1m',
                     years=3,  # <-- Параметр years теперь правильно передается
-                    force_refresh=force_refresh,
-                    use_fast=True  # Используем быструю загрузку
+                    force_refresh=force_refresh
                 )
                 
                 if df.empty:

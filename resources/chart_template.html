@@ -4,113 +4,150 @@
     <meta charset="UTF-8">
     <title>Chart</title>
     <style>
-        body { margin: 0; padding: 0; background: #1e222d; }
+        body { margin: 0; padding: 0; background: #1e222d; overflow: hidden; }
         #chart { width: 100vw; height: 100vh; }
     </style>
 </head>
 <body>
     <div id="chart"></div>
     
-    <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+    <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
     <script>
         let chart = null;
         let series = null;
         let currentData = [];
-        let timeframes = {
-            '1m': 1,
-            '5m': 5,
-            '15m': 15,
-            '1h': 60,
-            '4h': 240,
-            '1d': 1440,
-            '1w': 10080
-        };
         
         function initChart() {
-            chart = LightweightCharts.createChart(document.getElementById('chart'), {
-                width: window.innerWidth,
-                height: window.innerHeight,
-                layout: {
-                    background: { color: '#1e222d' },
-                    textColor: '#d1d4dc',
-                },
-                grid: {
-                    vertLines: { color: '#2a2e39' },
-                    horzLines: { color: '#2a2e39' },
-                },
-                timeScale: {
-                    timeVisible: true,
-                    secondsVisible: false,
-                },
-            });
-            
-            series = chart.addCandlestickSeries({
-                upColor: '#26a69a',
-                downColor: '#ef5350',
-                borderVisible: false,
-                wickUpColor: '#26a69a',
-                wickDownColor: '#ef5350',
-            });
-            
-            // Обработчик изменения видимой области (для синхронизации)
-            chart.timeScale().subscribeVisibleTimeRangeChange((range) => {
-                // Можно передать в Python, если нужно
-            });
-            
-            window.addEventListener('resize', () => {
-                chart.resize(window.innerWidth, window.innerHeight);
-            });
+            try {
+                // Проверяем, что библиотека загружена
+                if (typeof LightweightCharts === 'undefined') {
+                    console.error('LightweightCharts не загружен!');
+                    return;
+                }
+                
+                chart = LightweightCharts.createChart(document.getElementById('chart'), {
+                    width: document.getElementById('chart').clientWidth,
+                    height: document.getElementById('chart').clientHeight,
+                    layout: {
+                        background: { color: '#1e222d' },
+                        textColor: '#d1d4dc',
+                    },
+                    grid: {
+                        vertLines: { color: '#2a2e39' },
+                        horzLines: { color: '#2a2e39' },
+                    },
+                    timeScale: {
+                        timeVisible: true,
+                        secondsVisible: false,
+                        borderColor: '#2a2e39',
+                    },
+                    rightPriceScale: {
+                        borderColor: '#2a2e39',
+                    },
+                });
+                
+                series = chart.addCandlestickSeries({
+                    upColor: '#26a69a',
+                    downColor: '#ef5350',
+                    borderVisible: false,
+                    wickUpColor: '#26a69a',
+                    wickDownColor: '#ef5350',
+                });
+                
+                console.log('Chart initialized successfully');
+                
+            } catch (error) {
+                console.error('Error initializing chart:', error);
+            }
         }
         
         function updateChart(data) {
-            currentData = data;
-            series.setData(data);
-            chart.timeScale().fitContent();
+            if (!series) {
+                console.warn('Series not initialized, trying to init...');
+                initChart();
+                if (!series) return;
+            }
+            
+            try {
+                currentData = data;
+                series.setData(data);
+                chart.timeScale().fitContent();
+                console.log('Data updated:', data.length, 'candles');
+            } catch (error) {
+                console.error('Error updating chart:', error);
+            }
         }
         
         function setTimeframe(tf) {
-            // Переагрегация данных происходит в Python, здесь просто меняем метку
-            // Но можно и на JS сделать, если передать все 1-минутные данные
-            // Сейчас просто сбрасываем масштаб
-            chart.timeScale().fitContent();
+            if (chart) {
+                chart.timeScale().fitContent();
+            }
         }
         
         function setCurrentTime(timestamp) {
-            // timestamp - это миллисекунды
-            // Находим ближайшую свечу
-            let found = false;
-            for (let i = 0; i < currentData.length; i++) {
-                if (currentData[i].time >= timestamp) {
-                    const logical = i;
-                    chart.timeScale().setVisibleLogicalRange({
-                        from: Math.max(0, logical - 50),
-                        to: Math.min(currentData.length - 1, logical + 50),
-                    });
-                    found = true;
-                    break;
+            if (!chart || !currentData.length) return;
+            
+            try {
+                let found = false;
+                for (let i = 0; i < currentData.length; i++) {
+                    if (currentData[i].time >= timestamp) {
+                        const from = Math.max(0, i - 50);
+                        const to = Math.min(currentData.length - 1, i + 50);
+                        chart.timeScale().setVisibleLogicalRange({
+                            from: from,
+                            to: to,
+                        });
+                        found = true;
+                        break;
+                    }
                 }
-            }
-            if (!found && currentData.length > 0) {
-                chart.timeScale().setVisibleLogicalRange({
-                    from: Math.max(0, currentData.length - 100),
-                    to: currentData.length - 1,
-                });
+                if (!found) {
+                    chart.timeScale().setVisibleLogicalRange({
+                        from: Math.max(0, currentData.length - 100),
+                        to: currentData.length - 1,
+                    });
+                }
+            } catch (error) {
+                console.error('Error setting time:', error);
             }
         }
         
         function getCurrentTime() {
-            const range = chart.timeScale().getVisibleLogicalRange();
-            if (range && currentData.length > 0) {
-                const midIdx = Math.floor((range.from + range.to) / 2);
-                if (midIdx >= 0 && midIdx < currentData.length) {
-                    return currentData[midIdx].time;
+            if (!chart) return null;
+            try {
+                const range = chart.timeScale().getVisibleLogicalRange();
+                if (range && currentData.length > 0) {
+                    const midIdx = Math.floor((range.from + range.to) / 2);
+                    if (midIdx >= 0 && midIdx < currentData.length) {
+                        return currentData[midIdx].time;
+                    }
                 }
+            } catch (error) {
+                console.error('Error getting time:', error);
             }
             return null;
         }
         
-        // Инициализация после загрузки
-        document.addEventListener('DOMContentLoaded', initChart);
+        // Инициализация после полной загрузки страницы
+        if (document.readyState === 'complete') {
+            initChart();
+        } else {
+            window.addEventListener('load', function() {
+                setTimeout(initChart, 100); // Небольшая задержка для гарантии
+            });
+        }
+        
+        // Обработка изменения размера окна
+        window.addEventListener('resize', function() {
+            if (chart) {
+                chart.resize(
+                    document.getElementById('chart').clientWidth,
+                    document.getElementById('chart').clientHeight
+                );
+            }
+        });
+        
+        console.log('Chart template loaded');
     </script>
 </body>
 </html>
