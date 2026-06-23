@@ -167,20 +167,27 @@ class MainWindow(QMainWindow):
     def update_chart(self):
         """Обновляет график"""
         if self.current_data is not None and len(self.current_data) > 0:
-            self.chart.set_data(self.current_data)
-            
-            # Восстанавливаем позицию
-            if self.current_position is not None:
-                self.chart.set_current_time(self.current_position)
-            else:
-                # Показываем последние 100 свечей
-                if len(self.current_data) > 100:
-                    last_time = self.current_data.iloc[-1]['time']
-                    if isinstance(last_time, pd.Timestamp):
-                        last_time_ms = int(last_time.timestamp() * 1000)
-                    else:
-                        last_time_ms = int(last_time)
-                    self.chart.set_current_time(last_time_ms)
+            # Передаем данные с callback для подгонки масштаба
+            self.chart.set_data(self.current_data, callback=self._on_chart_updated)
+        
+    def _on_chart_updated(self):
+        """Вызывается после обновления графика"""
+        # Подгоняем масштаб еще раз после отрисовки
+        self.chart.fit_content()
+        
+        # Если есть сохраненная позиция - восстанавливаем
+        if self.current_position is not None:
+            self.chart.set_current_time(self.current_position)
+        else:
+            # Показываем последние 100 свечей
+            if len(self.current_data) > 100:
+                last_time = self.current_data.iloc[-1]['time']
+                if isinstance(last_time, pd.Timestamp):
+                    last_time_ms = int(last_time.timestamp() * 1000)
+                else:
+                    last_time_ms = int(last_time)
+                self.chart.set_current_time(last_time_ms)
+
     def update_slider(self):
         """Обновляет слайдер"""
         if self.current_data is not None:
@@ -214,17 +221,15 @@ class MainWindow(QMainWindow):
     def on_tf_changed(self, tf):
         """Переключение ТФ с сохранением позиции"""
         if tf != self.current_tf:
-            # Сохраняем текущую позицию
-            if self.current_data is not None and len(self.current_data) > self.current_index:
-                self.current_position = self.current_data.iloc[self.current_index]['time'].timestamp() * 1000
-            
             self.current_tf = tf
             
             if self.aggregator is not None:
                 self.current_data = self.aggregator.aggregate(tf)
                 self.update_slider()
                 self.update_chart()
-    
+                
+                # Подгоняем масштаб чтобы показать все данные
+                self.chart.fit_content()
     def on_refresh(self):
         """Принудительное обновление данных"""
         self.load_data(self.current_symbol, force_refresh=True)

@@ -57,49 +57,92 @@
             wickUpColor: '#26a69a',
         });
 
+        // Храним все данные
+        let fullData = [];
+        let isDataLoaded = false;
+        const DEFAULT_BARS_TO_SHOW = 500;
+
         // Функция для обновления графика
         function updateChart(data) {
-            // Проверяем, что данные получены
             if (!data || data.length === 0) {
                 console.log('Нет данных для отображения');
                 return;
             }
 
             console.log('Получено свечей:', data.length);
-            console.log('Первая свеча:', data[0]);
-            console.log('Последняя свеча:', data[data.length - 1]);
 
-            // Lightweight Charts ожидает данные в формате:
-            // { time: timestamp, open: price, high: price, low: price, close: price }
-            // time должен быть в секундах (Unix timestamp) или в формате 'YYYY-MM-DD'
-            const chartData = data.map(item => ({
-                time: Math.floor(item.time / 1000), // конвертируем миллисекунды в секунды
+            // Сохраняем все данные
+            fullData = data.map(item => ({
+                time: Math.floor(item.time / 1000),
                 open: item.open,
                 high: item.high,
                 low: item.low,
                 close: item.close,
             }));
 
-            series.setData(chartData);
-            chart.timeScale().fitContent();
+            // Показываем последние N свечей
+            showLastBars(DEFAULT_BARS_TO_SHOW);
+            isDataLoaded = true;
+        }
 
-            console.log('График обновлен, свечей:', chartData.length);
+        // Функция для показа последних N свечей
+        function showLastBars(count) {
+            if (!fullData || fullData.length === 0) return;
+
+            const total = fullData.length;
+            const barsToShow = Math.min(count, total);
+            const startIndex = Math.max(0, total - barsToShow);
+            
+            // Берем только последние N свечей
+            const visibleData = fullData.slice(startIndex);
+            series.setData(visibleData);
+            
+            // Подгоняем масштаб под видимые данные
+            chart.timeScale().fitContent();
+            
+            console.log(`Показано ${visibleData.length} свечей (из ${total})`);
         }
 
         // Функция для установки текущего времени
         function setCurrentTime(timestamp) {
-            // timestamp в миллисекундах, конвертируем в секунды
+            if (!fullData || fullData.length === 0) return;
+
             const timeInSeconds = Math.floor(timestamp / 1000);
-            chart.timeScale().setVisibleLogicalRange({
-                from: timeInSeconds - 86400 * 30, // 30 дней назад
-                to: timeInSeconds + 86400, // 1 день вперед
-            });
+            
+            // Находим индекс ближайшей свечи
+            let index = 0;
+            for (let i = 0; i < fullData.length; i++) {
+                if (fullData[i].time >= timeInSeconds) {
+                    index = i;
+                    break;
+                }
+            }
+            
+            // Показываем окно вокруг выбранной свечи
+            const halfWindow = Math.floor(DEFAULT_BARS_TO_SHOW / 2);
+            const from = Math.max(0, index - halfWindow);
+            const to = Math.min(fullData.length, index + halfWindow);
+            
+            const visibleData = fullData.slice(from, to);
+            series.setData(visibleData);
+            chart.timeScale().fitContent();
         }
 
         // Функция для установки таймфрейма
         function setTimeframe(tf) {
-            // Можно добавить логику для изменения отображения
             console.log('Таймфрейм:', tf);
+            // После смены ТФ показываем последние свечи
+            if (isDataLoaded) {
+                setTimeout(function() {
+                    showLastBars(DEFAULT_BARS_TO_SHOW);
+                }, 50);
+            }
+        }
+
+        // Функция для подгонки содержимого
+        function fitContent() {
+            if (!fullData || fullData.length === 0) return;
+            chart.timeScale().fitContent();
         }
 
         // Обработка изменения размера окна
@@ -114,6 +157,8 @@
         window.updateChart = updateChart;
         window.setCurrentTime = setCurrentTime;
         window.setTimeframe = setTimeframe;
+        window.fitContent = fitContent;
+        window.showLastBars = showLastBars;
         window.chart = chart;
         window.series = series;
 
