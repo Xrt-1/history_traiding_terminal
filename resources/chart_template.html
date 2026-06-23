@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Chart</title>
+    <style>
+        body { margin: 0; padding: 0; background: #1e222d; }
+        #chart { width: 100vw; height: 100vh; }
+    </style>
+</head>
+<body>
+    <div id="chart"></div>
+    
+    <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+    <script>
+        let chart = null;
+        let series = null;
+        let currentData = [];
+        let timeframes = {
+            '1m': 1,
+            '5m': 5,
+            '15m': 15,
+            '1h': 60,
+            '4h': 240,
+            '1d': 1440,
+            '1w': 10080
+        };
+        
+        function initChart() {
+            chart = LightweightCharts.createChart(document.getElementById('chart'), {
+                width: window.innerWidth,
+                height: window.innerHeight,
+                layout: {
+                    background: { color: '#1e222d' },
+                    textColor: '#d1d4dc',
+                },
+                grid: {
+                    vertLines: { color: '#2a2e39' },
+                    horzLines: { color: '#2a2e39' },
+                },
+                timeScale: {
+                    timeVisible: true,
+                    secondsVisible: false,
+                },
+            });
+            
+            series = chart.addCandlestickSeries({
+                upColor: '#26a69a',
+                downColor: '#ef5350',
+                borderVisible: false,
+                wickUpColor: '#26a69a',
+                wickDownColor: '#ef5350',
+            });
+            
+            // Обработчик изменения видимой области (для синхронизации)
+            chart.timeScale().subscribeVisibleTimeRangeChange((range) => {
+                // Можно передать в Python, если нужно
+            });
+            
+            window.addEventListener('resize', () => {
+                chart.resize(window.innerWidth, window.innerHeight);
+            });
+        }
+        
+        function updateChart(data) {
+            currentData = data;
+            series.setData(data);
+            chart.timeScale().fitContent();
+        }
+        
+        function setTimeframe(tf) {
+            // Переагрегация данных происходит в Python, здесь просто меняем метку
+            // Но можно и на JS сделать, если передать все 1-минутные данные
+            // Сейчас просто сбрасываем масштаб
+            chart.timeScale().fitContent();
+        }
+        
+        function setCurrentTime(timestamp) {
+            // timestamp - это миллисекунды
+            // Находим ближайшую свечу
+            let found = false;
+            for (let i = 0; i < currentData.length; i++) {
+                if (currentData[i].time >= timestamp) {
+                    const logical = i;
+                    chart.timeScale().setVisibleLogicalRange({
+                        from: Math.max(0, logical - 50),
+                        to: Math.min(currentData.length - 1, logical + 50),
+                    });
+                    found = true;
+                    break;
+                }
+            }
+            if (!found && currentData.length > 0) {
+                chart.timeScale().setVisibleLogicalRange({
+                    from: Math.max(0, currentData.length - 100),
+                    to: currentData.length - 1,
+                });
+            }
+        }
+        
+        function getCurrentTime() {
+            const range = chart.timeScale().getVisibleLogicalRange();
+            if (range && currentData.length > 0) {
+                const midIdx = Math.floor((range.from + range.to) / 2);
+                if (midIdx >= 0 && midIdx < currentData.length) {
+                    return currentData[midIdx].time;
+                }
+            }
+            return null;
+        }
+        
+        // Инициализация после загрузки
+        document.addEventListener('DOMContentLoaded', initChart);
+    </script>
+</body>
+</html>
