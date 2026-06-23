@@ -64,3 +64,17 @@ class ChartWidget(QWidget):
         })();
         """
         self.browser.page().runJavaScript(js_code, callback)
+        
+    def set_markers(self, markers):
+        """
+        markers: список словарей [
+            {'time': timestamp_ms, 'position': 'aboveBar'/'belowBar', 
+            'color': 'green'/'red', 'shape': 'arrowUp'/'arrowDown', 'text': 'BUY'}
+        ]
+        """
+        if not markers:
+            js_code = "series.setMarkers([]);"
+        else:
+            js_code = f"series.setMarkers({json.dumps(markers)});"
+        
+        self.browser.page().runJavaScript(js_code)
