@@ -276,22 +276,64 @@ class MainWindow(QMainWindow):
         return trimmed
     
     def update_chart(self):
-        trimmed = self.get_trimmed_data()
+        if self.full_data is None or self.full_data.empty:
+            return
+        
+        total_bars = len(self.full_data)
+        
+        # Убеждаемся, что индекс в допустимых пределах
+        if self.current_index >= total_bars:
+            self.current_index = total_bars - 1
+        if self.current_index < 0:
+            self.current_index = 0
+        
+        # Определяем размер окна (300 свечей)
+        window_size = 300
+        half_window = window_size // 2
+        
+        # Вычисляем диапазон для отображения с центром на current_index
+        from_idx = max(0, self.current_index - half_window)
+        to_idx = min(total_bars, self.current_index + half_window + 1)  # +1 для включения последней
+        
+        # Корректируем, если окно меньше желаемого размера
+        if to_idx - from_idx < window_size:
+            # Пытаемся расширить вправо
+            to_idx = min(total_bars, from_idx + window_size)
+            # Если не хватает справа, расширяем влево
+            if to_idx - from_idx < window_size:
+                from_idx = max(0, to_idx - window_size)
+        
+        # Берем срез данных
+        trimmed = self.full_data.iloc[from_idx:to_idx].copy()
+        
         if trimmed.empty:
             return
         
+        # Отправляем данные на график
         self.chart.set_data(trimmed)
         
-        if len(trimmed) > 0:
-            self.chart.show_last_bars(300)
+        # Показываем все полученные данные (они уже обрезаны до нужного окна)
+        self.chart.show_last_bars(len(trimmed))
+        
+        print(f"📊 Отображено свечей: {len(trimmed)} (индекс {self.current_index}, диапазон {from_idx}-{to_idx-1})")
     
     def update_slider(self):
         if self.full_data is not None and not self.full_data.empty:
             max_val = len(self.full_data) - 1
+            
+            # Блокируем сигналы
+            self.time_slider.blockSignals(True)
+            
+            # Обновляем слайдер
             self.time_slider.setMaximum(max(0, max_val))
             self.time_slider.setValue(min(self.current_index, max_val))
+            
+            # Разблокируем сигналы
+            self.time_slider.blockSignals(False)
+            
             self.update_time_label()
-    
+            print(f"🔄 Слайдер обновлен: {self.current_index}/{max_val}")
+            
     def update_time_label(self):
         if self.full_data is not None and not self.full_data.empty:
             max_idx = len(self.full_data) - 1
@@ -340,34 +382,73 @@ class MainWindow(QMainWindow):
             self.load_data(symbol)
     
     def on_tf_changed(self, tf):
-        if tf != self.current_tf:
-            if self.full_data is not None and not self.full_data.empty:
-                idx = min(self.current_index, len(self.full_data) - 1)
-                dt = self.full_data.iloc[idx]['time']
-                self.current_position_ms = int(dt.timestamp() * 1000)
+        """Переключение ТФ с сохранением позиции"""
+        if tf == self.current_tf:
+            return
+        
+        # Сохраняем текущую позицию перед переключением
+        if self.full_data is not None and not self.full_data.empty:
+            idx = min(self.current_index, len(self.full_data) - 1)
+            current_time = self.full_data.iloc[idx]['time']
+            self.current_position_ms = int(current_time.timestamp() * 1000)
+            print(f"📌 Сохраняем позицию: {current_time} (индекс {idx})")
+        
+        self.current_tf = tf
+        
+        if self.aggregator is not None:
+            # Агрегируем данные
+            self.full_data = self.aggregator.aggregate(tf)
             
-            self.current_tf = tf
+            if self.full_data.empty:
+                QMessageBox.warning(self, "Предупреждение", f"Нет данных для {tf}")
+                self.tf_combo.setCurrentText(self.current_tf)
+                return
             
-            if self.aggregator is not None:
-                self.full_data = self.aggregator.aggregate(tf)
+            total_bars = len(self.full_data)
+            print(f"📊 Новый ТФ {tf}: {total_bars} свечей")
+            
+            # Определяем новую позицию
+            if self.current_position_ms is not None:
+                new_idx = self.find_nearest_index(self.current_position_ms)
+                print(f"🔍 Найден индекс: {new_idx} из {total_bars}")
                 
-                if self.full_data.empty:
-                    QMessageBox.warning(self, "Предупреждение", f"Нет данных для {tf}")
-                    self.tf_combo.setCurrentText(self.current_tf)
-                    return
+                target_time = pd.to_datetime(self.current_position_ms, unit='ms')
+                new_time = self.full_data.iloc[new_idx]['time']
+                time_diff = abs((new_time - target_time).total_seconds() / 3600)
                 
-                if self.current_position_ms is not None:
-                    self.current_index = self.find_nearest_index(self.current_position_ms)
+                print(f"   Целевое время: {target_time}")
+                print(f"   Найденное время: {new_time}")
+                print(f"   Разница: {time_diff:.1f} часов")
+                
+                if time_diff > 48:
+                    print(f"⚠️ Слишком большая разница, показываем последние 300 свечей")
+                    if total_bars > 300:
+                        new_idx = total_bars - 300
+                    else:
+                        new_idx = 0
+                elif new_idx >= total_bars:
+                    new_idx = total_bars - 1
+                elif new_idx < 0:
+                    new_idx = 0
+            else:
+                if total_bars > 300:
+                    new_idx = total_bars - 300
                 else:
-                    # По умолчанию показываем последние 300
-                    total_bars = len(self.full_data)
-                    self.current_index = max(0, total_bars - 300)
-                
-                self.update_slider()
-                self.update_chart()
-                self.update_info()
-                self.status_label.setText(f"✅ {self.current_symbol} {tf} - {len(self.full_data)} свечей")
-    
+                    new_idx = 0
+            
+            # Устанавливаем индекс
+            self.current_index = new_idx
+            print(f"✅ Итоговый индекс: {self.current_index}")
+            
+            # Обновляем интерфейс
+            self.update_info()
+            self.update_slider()
+            self.update_chart()
+            self.chart.set_timeframe(tf)
+            
+            self.status_label.setText(f"✅ {self.current_symbol} {tf} - {total_bars} свечей")
+
+
     def find_nearest_index(self, timestamp_ms: int) -> int:
         if self.full_data is None or self.full_data.empty:
             return 0
@@ -384,6 +465,8 @@ class MainWindow(QMainWindow):
     def on_refresh(self):
         self.load_data(self.current_symbol, force_refresh=True)
     
+    import traceback
+
     def on_slider_changed(self, value):
         if self.full_data is None or self.full_data.empty:
             return
@@ -391,7 +474,8 @@ class MainWindow(QMainWindow):
         self.current_index = min(value, len(self.full_data) - 1)
         self.update_time_label()
         self.update_chart()
-    
+        print(f"🎯 Слайдер перемещен: {self.current_index}")
+        
     def on_play(self):
         if self.full_data is None or self.full_data.empty:
             return
