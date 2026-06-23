@@ -15,9 +15,9 @@ class DataAggregator:
     def get_resample_rule(tf: str) -> str:
         """Преобразует текстовый ТФ в правило pandas"""
         tf_map = {
-            '1m': '1T',
-            '5m': '5T', 
-            '15m': '15T',
+            '1m': '1min',      # <-- Исправлено
+            '5m': '5min',      # <-- Исправлено
+            '15m': '15min',    # <-- Исправлено
             '1H': '1H',
             '4H': '4H',
             '1D': '1D',
@@ -35,21 +35,39 @@ class DataAggregator:
         
         rule = self.get_resample_rule(tf)
         
-        # Агрегация
-        aggregated = self.raw_data.resample(rule).agg({
-            'open': 'first',
-            'high': 'max',
-            'low': 'min',
-            'close': 'last',
-            'volume': 'sum'
-        }).dropna()
+        # Проверяем, что данных достаточно для агрегации
+        if self.raw_data.empty:
+            print(f"⚠️ Нет данных для агрегации")
+            return pd.DataFrame(columns=['time', 'open', 'high', 'low', 'close', 'volume'])
         
-        # Сбрасываем индекс, чтобы 'time' стала колонкой
-        aggregated = aggregated.reset_index()
-        
-        # Кешируем
-        self.cache[tf] = aggregated
-        return aggregated
+        try:
+            # Агрегация
+            aggregated = self.raw_data.resample(rule).agg({
+                'open': 'first',
+                'high': 'max',
+                'low': 'min',
+                'close': 'last',
+                'volume': 'sum'
+            }).dropna()
+            
+            # Проверяем, что агрегация вернула данные
+            if aggregated.empty:
+                print(f"⚠️ Агрегация для {tf} вернула пустой результат")
+                return pd.DataFrame(columns=['time', 'open', 'high', 'low', 'close', 'volume'])
+            
+            # Сбрасываем индекс, чтобы 'time' стала колонкой
+            aggregated = aggregated.reset_index()
+            
+            # Кешируем
+            self.cache[tf] = aggregated
+            
+            print(f"✅ Агрегировано {len(aggregated)} свечей для {tf}")
+            return aggregated
+            
+        except Exception as e:
+            print(f"❌ Ошибка при агрегации {tf}: {e}")
+            # Возвращаем пустой DataFrame с правильными колонками
+            return pd.DataFrame(columns=['time', 'open', 'high', 'low', 'close', 'volume'])
     
     def get_available_tfs(self) -> list:
         """Возвращает список ТФ, для которых есть данные"""
@@ -58,3 +76,14 @@ class DataAggregator:
     def clear_cache(self):
         """Очищает кеш (если данные изменились)"""
         self.cache.clear()
+    
+    def get_data_info(self) -> dict:
+        """Возвращает информацию о данных"""
+        if self.raw_data.empty:
+            return {'total_bars': 0, 'start_date': None, 'end_date': None}
+        
+        return {
+            'total_bars': len(self.raw_data),
+            'start_date': self.raw_data.index.min(),
+            'end_date': self.raw_data.index.max()
+        }

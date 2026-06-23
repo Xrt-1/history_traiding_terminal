@@ -121,7 +121,7 @@ class MainWindow(QMainWindow):
         self.timer = QTimer()
         self.timer.timeout.connect(self.play_step)
         self.is_playing = False
-        
+
     def load_data(self, symbol: str, force_refresh: bool = False):
         """
         Загружает данные для актива
@@ -131,11 +131,10 @@ class MainWindow(QMainWindow):
         
         try:
             if symbol not in self.data_cache or force_refresh:
-                # Используем быструю загрузку
                 df = self.fetcher.fetch_with_cache(
                     symbol=symbol,
                     interval='1m',
-                    years=3,  # <-- Параметр years теперь правильно передается
+                    years=3,
                     force_refresh=force_refresh
                 )
                 
@@ -144,7 +143,21 @@ class MainWindow(QMainWindow):
                                     f"Не удалось загрузить данные для {symbol}")
                     return
                 
-                # Создаем агрегатор
+                # Проверяем, что данных достаточно
+                if len(df) < 60:  # Минимум 60 свечей
+                    QMessageBox.warning(
+                        self, 
+                        "Предупреждение", 
+                        f"Загружено всего {len(df)} свечей. "
+                        f"Для работы нужно минимум 60 свечей."
+                    )
+                    return
+                
+                # Проверяем частоту данных
+                time_diff = df['time'].diff().dt.total_seconds()
+                if (time_diff > 120).any():  # Разрыв больше 2 минут
+                    print(f"⚠️ Обнаружены разрывы в данных для {symbol}")
+                
                 self.aggregator = DataAggregator(df)
                 self.data_cache[symbol] = self.aggregator
             else:
@@ -153,17 +166,43 @@ class MainWindow(QMainWindow):
             # Обновляем текущий ТФ
             self.current_data = self.aggregator.aggregate(self.current_tf)
             
+            # Проверяем, что агрегация успешна
+            if self.current_data.empty:
+                # Пробуем другой ТФ
+                alternative_tf = '1H'
+                self.current_data = self.aggregator.aggregate(alternative_tf)
+                if not self.current_data.empty:
+                    self.current_tf = alternative_tf
+                    self.tf_combo.setCurrentText(alternative_tf)
+                    QMessageBox.information(
+                        self,
+                        "Информация",
+                        f"Для {symbol} данных недостаточно для {self.current_tf}.\n"
+                        f"Переключено на {alternative_tf}"
+                    )
+                else:
+                    QMessageBox.warning(
+                        self,
+                        "Ошибка",
+                        f"Не удалось агрегировать данные для {symbol}"
+                    )
+                    return
+            
             # Обновляем интерфейс
             self.update_chart()
             self.update_slider()
             
-            self.status_label.setText(f"Статус: Загружено {len(self.current_data)} свечей")
+            self.status_label.setText(
+                f"Статус: {symbol} {self.current_tf} - "
+                f"{len(self.current_data)} свечей"
+            )
             
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Ошибка загрузки данных: {e}")
             self.status_label.setText("Статус: Ошибка загрузки")
         finally:
             self.btn_refresh.setEnabled(True)
+
     def update_chart(self):
         """Обновляет график"""
         if self.current_data is not None and len(self.current_data) > 0:
@@ -217,19 +256,40 @@ class MainWindow(QMainWindow):
             self.current_symbol = symbol
             self.current_position = None
             self.load_data(symbol)
-    
+
+    # В методе on_tf_changed добавьте:
     def on_tf_changed(self, tf):
         """Переключение ТФ с сохранением позиции"""
         if tf != self.current_tf:
             self.current_tf = tf
             
             if self.aggregator is not None:
-                self.current_data = self.aggregator.aggregate(tf)
-                self.update_slider()
-                self.update_chart()
-                
-                # Подгоняем масштаб чтобы показать все данные
-                self.chart.fit_content()
+                try:
+                    # Агрегируем все данные
+                    aggregated = self.aggregator.aggregate(tf)
+                    
+                    if aggregated.empty:
+                        QMessageBox.warning(self, "Предупреждение", f"Нет данных для таймфрейма {tf}")
+                        self.tf_combo.setCurrentText(self.current_tf)
+                        return
+                    
+                    # Сохраняем все данные
+                    self.current_data = aggregated
+                    
+                    # Обновляем слайдер
+                    self.update_slider()
+                    
+                    # Обновляем график (первоначально покажет последние 5000 свечей)
+                    self.update_chart()
+                    
+                    self.status_label.setText(
+                        f"Статус: {tf} - всего {len(self.current_data)} свечей"
+                    )
+                    
+                except Exception as e:
+                    QMessageBox.critical(self, "Ошибка", f"Ошибка при смене таймфрейма: {e}")
+                    self.tf_combo.setCurrentText(self.current_tf)
+
     def on_refresh(self):
         """Принудительное обновление данных"""
         self.load_data(self.current_symbol, force_refresh=True)
