@@ -175,9 +175,12 @@ class MainWindow(QMainWindow):
             else:
                 # Показываем последние 100 свечей
                 if len(self.current_data) > 100:
-                    last_time = self.current_data.iloc[-1]['time'].timestamp() * 1000
-                    self.chart.set_current_time(last_time)
-    
+                    last_time = self.current_data.iloc[-1]['time']
+                    if isinstance(last_time, pd.Timestamp):
+                        last_time_ms = int(last_time.timestamp() * 1000)
+                    else:
+                        last_time_ms = int(last_time)
+                    self.chart.set_current_time(last_time_ms)
     def update_slider(self):
         """Обновляет слайдер"""
         if self.current_data is not None:
