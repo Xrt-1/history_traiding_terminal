@@ -1,21 +1,55 @@
+# main.py - Минималистичный интерфейс в стиле Telegram/macOS
 import sys
 import os
 from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                              QPushButton, QComboBox, QSlider, QLabel, QMessageBox,
-                             QFrame, QSplitter)
-from PyQt5.QtCore import Qt, QTimer, QSize
-from PyQt5.QtGui import QFont
+                             QFrame, QSplitter, QStackedWidget, QGraphicsDropShadowEffect)
+from PyQt5.QtCore import Qt, QTimer, QSize, QPropertyAnimation, QEasingCurve, pyqtProperty
+from PyQt5.QtGui import QFont, QColor, QPalette, QLinearGradient, QBrush, QPainter, QPen, QIcon, QPixmap, QPainterPath
 import pandas as pd
+from style_manager import StyleManager  # ← новый импорт
 
 from data_fetcher import BinanceFetcher
 from data_aggregator import DataAggregator
 from chart_widget import ChartWidget
 
+
+class ModernButton(QPushButton):
+    """Кнопка с плавной анимацией"""
+    def __init__(self, text="", parent=None):
+        super().__init__(text, parent)
+        self._opacity = 1.0
+        self.animation = QPropertyAnimation(self, b"opacity")
+        self.animation.setDuration(150)
+        
+    def enterEvent(self, event):
+        self.animation.stop()
+        self.animation.setEndValue(0.7)
+        self.animation.start()
+        super().enterEvent(event)
+        
+    def leaveEvent(self, event):
+        self.animation.stop()
+        self.animation.setEndValue(1.0)
+        self.animation.start()
+        super().leaveEvent(event)
+        
+    def get_opacity(self):
+        return self._opacity
+    
+    def set_opacity(self, value):
+        self._opacity = value
+        self.update()
+        
+    opacity = pyqtProperty(float, get_opacity, set_opacity)
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
-        super().__init__()
-        self.setWindowTitle("Демо-терминал - TradingView Clone")
-        self.setGeometry(100, 100, 1600, 900)
+        super().__init__()  # ← Убрал дублирование super().__init__()
+        self.setWindowTitle("TradeView")
+        self.setGeometry(100, 100, 1400, 880)
+        self.setMinimumSize(1100, 700)
         
         # Инициализация
         self.fetcher = BinanceFetcher('data')
@@ -45,171 +79,233 @@ class MainWindow(QMainWindow):
         # Загружаем данные
         self.load_data(self.current_symbol)
         
+        # Применяем тень к окну
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setup_window_controls()
+        
+    def setup_window_controls(self):
+        """Создает кастомные кнопки управления окном"""
+        # Это будет в верхней панели
+        pass
+        
     def setup_ui(self):
+        # Центральный виджет с прозрачным фоном
         central = QWidget()
+        central.setObjectName("centralWidget")
         self.setCentralWidget(central)
+        
+        # Основной вертикальный макет
         main_layout = QVBoxLayout(central)
-        main_layout.setSpacing(3)
-        main_layout.setContentsMargins(5, 5, 5, 5)
+        main_layout.setSpacing(0)
+        main_layout.setContentsMargins(0, 0, 0, 0)
         
-        # --- Верхняя панель ---
-        top_panel = QHBoxLayout()
-        top_panel.setSpacing(10)
+        # ========== ВЕРХНЯЯ ПАНЕЛЬ ==========
+        top_panel = QWidget()
+        top_panel.setObjectName("topPanel")
+        top_panel.setFixedHeight(56)
+        top_panel_layout = QHBoxLayout(top_panel)
+        top_panel_layout.setContentsMargins(20, 8, 20, 8)
+        top_panel_layout.setSpacing(12)
         
-        # Заголовок
-        title = QLabel("📊 Демо-терминал")
-        title.setFont(QFont("Arial", 12, QFont.Bold))
-        top_panel.addWidget(title)
+        # Логотип / Заголовок
+        title_label = QLabel("📊 TradeView")
+        title_label.setObjectName("titleLabel")
+        top_panel_layout.addWidget(title_label)
         
-        top_panel.addWidget(QLabel("|"))
+        # Разделитель
+        sep = QLabel("|")
+        sep.setStyleSheet("color: rgba(0,0,0,0.15); font-size: 20px;")
+        top_panel_layout.addWidget(sep)
         
         # Выбор актива
-        top_panel.addWidget(QLabel("Актив:"))
+        asset_label = QLabel("Актив")
+        asset_label.setStyleSheet("color: #8e8e93; font-size: 12px; font-weight: 500;")
+        top_panel_layout.addWidget(asset_label)
+        
         self.asset_combo = QComboBox()
         self.asset_combo.addItems(['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT'])
-        self.asset_combo.setFixedWidth(100)
+        self.asset_combo.setFixedWidth(110)
         self.asset_combo.currentTextChanged.connect(self.on_asset_changed)
-        top_panel.addWidget(self.asset_combo)
+        top_panel_layout.addWidget(self.asset_combo)
         
-        # Выбор ТФ
-        top_panel.addWidget(QLabel("ТФ:"))
+        # Таймфрейм
+        tf_label = QLabel("ТФ")
+        tf_label.setStyleSheet("color: #8e8e93; font-size: 12px; font-weight: 500;")
+        top_panel_layout.addWidget(tf_label)
+        
         self.tf_combo = QComboBox()
         self.tf_combo.addItems(['1m', '5m', '15m', '1H', '4H', '1D', '1W'])
         self.tf_combo.setCurrentText('1H')
-        self.tf_combo.setFixedWidth(60)
+        self.tf_combo.setFixedWidth(70)
         self.tf_combo.currentTextChanged.connect(self.on_tf_changed)
-        top_panel.addWidget(self.tf_combo)
+        top_panel_layout.addWidget(self.tf_combo)
         
-        top_panel.addWidget(QLabel("|"))
+        top_panel_layout.addSpacing(8)
         
         # Кнопка обновить
-        self.btn_refresh = QPushButton("🔄")
-        self.btn_refresh.setFixedSize(30, 30)
+        self.btn_refresh = ModernButton("⟳")
+        self.btn_refresh.setFixedSize(34, 34)
+        self.btn_refresh.setStyleSheet("font-size: 18px;")
         self.btn_refresh.setToolTip("Обновить данные")
         self.btn_refresh.clicked.connect(self.on_refresh)
-        top_panel.addWidget(self.btn_refresh)
+        top_panel_layout.addWidget(self.btn_refresh)
         
-        top_panel.addStretch()
+        top_panel_layout.addStretch()
         
         # Информация о данных
-        self.data_info_label = QLabel("Свечей: 0 | Период: -")
-        self.data_info_label.setFont(QFont("Arial", 9))
-        top_panel.addWidget(self.data_info_label)
-        
-        top_panel.addWidget(QLabel("|"))
-        
-        # Баланс
-        self.balance_label = QLabel("💰 $10,000.00")
-        self.balance_label.setFont(QFont("Arial", 10, QFont.Bold))
-        top_panel.addWidget(self.balance_label)
-        
-        top_panel.addWidget(QLabel("|"))
-        
-        # PnL
-        self.pnl_label = QLabel("PnL: $0.00")
-        self.pnl_label.setFont(QFont("Arial", 10))
-        top_panel.addWidget(self.pnl_label)
-        
-        main_layout.addLayout(top_panel)
+        self.data_info_label = QLabel("")
+        self.data_info_label.setObjectName("infoLabel")
+        top_panel_layout.addWidget(self.data_info_label)
         
         # Разделитель
-        line = QFrame()
-        line.setFrameShape(QFrame.HLine)
-        line.setFrameShadow(QFrame.Sunken)
-        main_layout.addWidget(line)
+        sep2 = QLabel("|")
+        sep2.setStyleSheet("color: rgba(0,0,0,0.15); font-size: 20px;")
+        top_panel_layout.addWidget(sep2)
         
-        # --- График ---
+        # Баланс
+        self.balance_label = QLabel("$10,000.00")
+        self.balance_label.setObjectName("balanceLabel")
+        top_panel_layout.addWidget(self.balance_label)
+        
+        # PnL
+        self.pnl_label = QLabel("$0.00")
+        self.pnl_label.setObjectName("pnlLabel")
+        top_panel_layout.addWidget(self.pnl_label)
+        
+        main_layout.addWidget(top_panel)
+        
+        # ========== ГРАФИК ==========
+        # Контейнер графика с фоном
+        chart_container = QWidget()
+        chart_container.setStyleSheet("""
+            background: #ffffff;
+            border-radius: 0px;
+        """)
+        chart_layout = QVBoxLayout(chart_container)
+        chart_layout.setContentsMargins(0, 0, 0, 0)
+        
         self.chart = ChartWidget()
         self.chart.load_more_data.connect(self.on_load_more_data)
-        main_layout.addWidget(self.chart, stretch=10)
+        chart_layout.addWidget(self.chart)
         
-        # --- Нижняя панель ---
-        bottom_panel = QVBoxLayout()
-        bottom_panel.setSpacing(5)
+        main_layout.addWidget(chart_container, stretch=1)
         
-        # Слайдер времени
-        slider_layout = QHBoxLayout()
-        slider_layout.addWidget(QLabel("⏱️"))
+        # ========== НИЖНЯЯ ПАНЕЛЬ ==========
+        bottom_panel = QWidget()
+        bottom_panel.setObjectName("bottomPanel")
+        bottom_panel.setStyleSheet("""
+            #bottomPanel {
+                background: rgba(255, 255, 255, 0.92);
+                backdrop-filter: blur(20px);
+                -webkit-backdrop-filter: blur(20px);
+                border-top: 1px solid rgba(0, 0, 0, 0.06);
+                padding: 8px 16px;
+            }
+        """)
+        bottom_panel.setFixedHeight(100)
+        bottom_layout = QVBoxLayout(bottom_panel)
+        bottom_layout.setContentsMargins(16, 6, 16, 6)
+        bottom_layout.setSpacing(6)
+        
+        # --- Слайдер ---
+        slider_row = QHBoxLayout()
+        slider_row.setSpacing(12)
+        
+        # Иконка времени
+        time_icon = QLabel("⏱")
+        time_icon.setStyleSheet("font-size: 16px;")
+        slider_row.addWidget(time_icon)
         
         self.time_slider = QSlider(Qt.Horizontal)
         self.time_slider.setMinimum(0)
         self.time_slider.setMaximum(1000)
-        self.time_slider.setTickPosition(QSlider.TicksBelow)
-        self.time_slider.setTickInterval(100)
         self.time_slider.valueChanged.connect(self.on_slider_changed)
-        slider_layout.addWidget(self.time_slider)
+        slider_row.addWidget(self.time_slider)
         
-        self.time_label = QLabel("2020-01-01 00:00")
-        self.time_label.setFont(QFont("Arial", 9))
-        self.time_label.setFixedWidth(150)
-        slider_layout.addWidget(self.time_label)
+        self.time_label = QLabel("--:--")
+        self.time_label.setObjectName("timeLabel")
+        slider_row.addWidget(self.time_label)
         
         self.position_label = QLabel("0 / 0")
-        self.position_label.setFont(QFont("Arial", 9))
-        self.position_label.setFixedWidth(80)
-        slider_layout.addWidget(self.position_label)
+        self.position_label.setObjectName("positionLabel")
+        slider_row.addWidget(self.position_label)
         
-        bottom_panel.addLayout(slider_layout)
+        bottom_layout.addLayout(slider_row)
         
-        # Кнопки управления
-        btn_layout = QHBoxLayout()
-        btn_layout.setSpacing(5)
+        # --- Кнопки управления ---
+        controls_row = QHBoxLayout()
+        controls_row.setSpacing(6)
+        
+        # Группа навигации
+        nav_group = QWidget()
+        nav_group.setObjectName("navGroup")  # ← добавил objectName
+        nav_group.setStyleSheet("""
+            QWidget#navGroup {
+                background: rgba(0, 0, 0, 0.03);
+                border-radius: 8px;
+                padding: 2px;
+            }
+        """)
+        nav_layout = QHBoxLayout(nav_group)
+        nav_layout.setSpacing(2)
+        nav_layout.setContentsMargins(4, 2, 4, 2)
         
         # Кнопки навигации
-        self.btn_begin = QPushButton("⏮")
-        self.btn_begin.setFixedSize(35, 30)
-        self.btn_begin.setToolTip("В начало")
-        self.btn_begin.clicked.connect(self.go_to_begin)
-        btn_layout.addWidget(self.btn_begin)
+        nav_buttons = [
+            ("◀◀", self.go_to_begin, "В начало"),      # или «
+            ("◀", self.on_step_back, "Шаг назад"),      # или ‹
+            ("▶", self.on_step_forward, "Шаг вперед"),  # или ›
+            ("▶▶", self.go_to_end, "В конец")           # или »
+        ]
+        for icon, func, tip in nav_buttons:
+            btn = ModernButton(icon)
+            btn.setFixedSize(32, 30)
+            btn.setToolTip(tip)
+            btn.setStyleSheet("font-size: 14px;")
+            btn.clicked.connect(func)
+            nav_layout.addWidget(btn)
         
-        self.btn_step_back = QPushButton("⏪")
-        self.btn_step_back.setFixedSize(35, 30)
-        self.btn_step_back.setToolTip("Шаг назад")
-        self.btn_step_back.clicked.connect(self.on_step_back)
-        btn_layout.addWidget(self.btn_step_back)
+        controls_row.addWidget(nav_group)
         
-        self.btn_play = QPushButton("▶ Play")
-        self.btn_play.setFixedSize(80, 30)
-        self.btn_play.setToolTip("Воспроизвести историю")
+        controls_row.addSpacing(8)
+        
+        # Кнопка Play
+        self.btn_play = QPushButton("▶ Воспроизвести")
+        self.btn_play.setObjectName("playBtn")
+        self.btn_play.setFixedSize(130, 34)
         self.btn_play.clicked.connect(self.on_play)
-        btn_layout.addWidget(self.btn_play)
+        controls_row.addWidget(self.btn_play)
         
-        self.btn_step_forward = QPushButton("⏩")
-        self.btn_step_forward.setFixedSize(35, 30)
-        self.btn_step_forward.setToolTip("Шаг вперед")
-        self.btn_step_forward.clicked.connect(self.on_step_forward)
-        btn_layout.addWidget(self.btn_step_forward)
-        
-        self.btn_end = QPushButton("⏭")
-        self.btn_end.setFixedSize(35, 30)
-        self.btn_end.setToolTip("В конец")
-        self.btn_end.clicked.connect(self.go_to_end)
-        btn_layout.addWidget(self.btn_end)
-        
-        btn_layout.addWidget(QLabel("|"))
+        controls_row.addSpacing(8)
         
         # Скорость
-        btn_layout.addWidget(QLabel("Скорость:"))
+        speed_label = QLabel("Скорость")
+        speed_label.setStyleSheet("color: #8e8e93; font-size: 12px; font-weight: 500;")
+        controls_row.addWidget(speed_label)
+        
         self.speed_combo = QComboBox()
         self.speed_combo.addItems(['0.1x', '0.25x', '0.5x', '1x', '2x', '5x', '10x'])
         self.speed_combo.setCurrentText('1x')
-        self.speed_combo.setFixedWidth(60)
+        self.speed_combo.setFixedWidth(65)
         self.speed_combo.currentTextChanged.connect(self.on_speed_changed)
-        btn_layout.addWidget(self.speed_combo)
+        controls_row.addWidget(self.speed_combo)
         
-        btn_layout.addStretch()
+        controls_row.addStretch()
         
         # Статус
         self.status_label = QLabel("✅ Готов")
-        self.status_label.setFont(QFont("Arial", 9))
-        btn_layout.addWidget(self.status_label)
+        self.status_label.setObjectName("statusLabel")
+        controls_row.addWidget(self.status_label)
         
-        bottom_panel.addLayout(btn_layout)
-        main_layout.addLayout(bottom_panel)
+        bottom_layout.addLayout(controls_row)
+        main_layout.addWidget(bottom_panel)
         
         # --- Таймер ---
         self.timer = QTimer()
         self.timer.timeout.connect(self.play_step)
+        
+        # Обновляем информацию
+        self.update_balance_display()
         
     def get_speed_ms(self) -> int:
         speed_text = self.speed_combo.currentText()
@@ -218,7 +314,7 @@ class MainWindow(QMainWindow):
         return int(base_ms / speed)
     
     def load_data(self, symbol: str, force_refresh: bool = False):
-        self.status_label.setText(f"⏳ Загрузка {symbol}...")
+        self.status_label.setText("⏳ Загрузка...")
         self.btn_refresh.setEnabled(False)
         
         try:
@@ -245,7 +341,6 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(self, "Ошибка", f"Нет данных для {self.current_tf}")
                 return
             
-            # --- ИСПРАВЛЕНИЕ: Показываем последние 300 свечей при старте ---
             total_bars = len(self.full_data)
             if total_bars > 300:
                 self.current_index = total_bars - 300
@@ -255,10 +350,10 @@ class MainWindow(QMainWindow):
             self.current_position_ms = None
             
             self.update_slider()
-            self.update_chart(reset_view=True)  # Сбрасываем вид при первичной загрузке
+            self.update_chart(reset_view=True)
             self.update_info()
             
-            self.status_label.setText(f"✅ {symbol} {self.current_tf} - {total_bars} свечей")
+            self.status_label.setText(f"✅ {symbol} · {total_bars} свечей")
             
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Ошибка загрузки данных: {e}")
@@ -282,46 +377,32 @@ class MainWindow(QMainWindow):
         
         total_bars = len(self.full_data)
         
-        # Убеждаемся, что индекс в допустимых пределах
         if self.current_index >= total_bars:
             self.current_index = total_bars - 1
         if self.current_index < 0:
             self.current_index = 0
         
-        # --- БУФЕР ДЛЯ РУЧНОГО СКРОЛЛА МЫШЬЮ (например, 1000 свечей) ---
-        # Это история, которая будет доступна для просмотра ЛКМ "назад"
         history_buffer = 1000
-        
         to_idx = self.current_index + 1
         from_idx = max(0, to_idx - history_buffer)
         
-        # Вырезаем данные от прошлого до текущего момента на слайдере
         trimmed = self.full_data.iloc[from_idx:to_idx].copy()
         
         if trimmed.empty:
             return
         
-        # Отправляем этот срез данных на график (с флагом сброса вида или его сохранения)
         self.chart.set_data(trimmed, reset_view=reset_view)
-        
-        print(f"📊 Слайдер перемещен. На график загружен буфер из {len(trimmed)} свечей (текущая точка: {self.current_index}, reset_view={reset_view})")
         
     def update_slider(self):
         if self.full_data is not None and not self.full_data.empty:
             max_val = len(self.full_data) - 1
             
-            # Блокируем сигналы
             self.time_slider.blockSignals(True)
-            
-            # Обновляем слайдер
             self.time_slider.setMaximum(max(0, max_val))
             self.time_slider.setValue(min(self.current_index, max_val))
-            
-            # Разблокируем сигналы
             self.time_slider.blockSignals(False)
             
             self.update_time_label()
-            print(f"🔄 Слайдер обновлен: {self.current_index}/{max_val}")
             
     def update_time_label(self):
         if self.full_data is not None and not self.full_data.empty:
@@ -329,22 +410,22 @@ class MainWindow(QMainWindow):
             idx = min(self.current_index, max_idx)
             
             dt = self.full_data.iloc[idx]['time']
-            self.time_label.setText(dt.strftime('%Y-%m-%d %H:%M'))
+            self.time_label.setText(dt.strftime('%d.%m.%Y %H:%M'))
             self.position_label.setText(f"{idx + 1} / {max_idx + 1}")
     
     def update_info(self):
         if self.full_data is not None and not self.full_data.empty:
-            start = self.full_data.iloc[0]['time'].strftime('%Y-%m-%d')
-            end = self.full_data.iloc[-1]['time'].strftime('%Y-%m-%d')
-            self.data_info_label.setText(f"Свечей: {len(self.full_data)} | {start} → {end}")
+            start = self.full_data.iloc[0]['time'].strftime('%d.%m.%Y')
+            end = self.full_data.iloc[-1]['time'].strftime('%d.%m.%Y')
+            self.data_info_label.setText(f"{len(self.full_data)} свечей · {start} → {end}")
     
     def update_balance_display(self):
         pnl = self.balance - 10000
-        color = "green" if pnl >= 0 else "red"
+        color = "#34c759" if pnl >= 0 else "#ff3b30"
         
-        self.balance_label.setText(f"💰 ${self.balance:,.2f}")
-        self.pnl_label.setText(f'PnL: <span style="color:{color}">${pnl:,.2f}</span>')
-        self.pnl_label.setTextFormat(Qt.RichText)
+        self.balance_label.setText(f"${self.balance:,.2f}")
+        self.pnl_label.setStyleSheet(f"color: {color}; font-weight: 600; font-size: 15px;")
+        self.pnl_label.setText(f"{'+' if pnl >= 0 else ''}{pnl:,.2f}")
     
     def go_to_begin(self):
         if self.is_playing:
@@ -371,21 +452,17 @@ class MainWindow(QMainWindow):
             self.load_data(symbol)
     
     def on_tf_changed(self, tf):
-        """Переключение ТФ с сохранением позиции"""
         if tf == self.current_tf:
             return
         
-        # Сохраняем текущую позицию перед переключением
         if self.full_data is not None and not self.full_data.empty:
             idx = min(self.current_index, len(self.full_data) - 1)
             current_time = self.full_data.iloc[idx]['time']
             self.current_position_ms = int(current_time.timestamp() * 1000)
-            print(f"📌 Сохраняем позицию: {current_time} (индекс {idx})")
         
         self.current_tf = tf
         
         if self.aggregator is not None:
-            # Агрегируем данные
             self.full_data = self.aggregator.aggregate(tf)
             
             if self.full_data.empty:
@@ -394,23 +471,15 @@ class MainWindow(QMainWindow):
                 return
             
             total_bars = len(self.full_data)
-            print(f"📊 Новый ТФ {tf}: {total_bars} свечей")
             
-            # Определяем новую позицию
             if self.current_position_ms is not None:
                 new_idx = self.find_nearest_index(self.current_position_ms)
-                print(f"🔍 Найден индекс: {new_idx} из {total_bars}")
                 
                 target_time = pd.to_datetime(self.current_position_ms, unit='ms')
                 new_time = self.full_data.iloc[new_idx]['time']
                 time_diff = abs((new_time - target_time).total_seconds() / 3600)
                 
-                print(f"   Целевое время: {target_time}")
-                print(f"   Найденное время: {new_time}")
-                print(f"   Разница: {time_diff:.1f} часов")
-                
                 if time_diff > 48:
-                    print(f"⚠️ Слишком большая разница, показываем последние 300 свечей")
                     if total_bars > 300:
                         new_idx = total_bars - 300
                     else:
@@ -425,17 +494,14 @@ class MainWindow(QMainWindow):
                 else:
                     new_idx = 0
             
-            # Устанавливаем индекс
             self.current_index = new_idx
-            print(f"✅ Итоговый индекс: {self.current_index}")
             
-            # Обновляем интерфейс
             self.update_info()
             self.update_slider()
-            self.update_chart(reset_view=True) # Сбрасываем вид для нового ТФ
+            self.update_chart(reset_view=True)
             self.chart.set_timeframe(tf)
             
-            self.status_label.setText(f"✅ {self.current_symbol} {tf} - {total_bars} свечей")
+            self.status_label.setText(f"✅ {self.current_symbol} · {tf} · {total_bars} свечей")
 
     def find_nearest_index(self, timestamp_ms: int) -> int:
         if self.full_data is None or self.full_data.empty:
@@ -459,8 +525,7 @@ class MainWindow(QMainWindow):
         
         self.current_index = min(value, len(self.full_data) - 1)
         self.update_time_label()
-        self.update_chart(reset_view=False) # Не сбрасываем вид при скролле слайдера
-        print(f"🎯 Слайдер перемещен: {self.current_index}")
+        self.update_chart(reset_view=False)
         
     def on_play(self):
         if self.full_data is None or self.full_data.empty:
@@ -474,18 +539,27 @@ class MainWindow(QMainWindow):
         if self.is_playing:
             self.is_playing = False
             self.timer.stop()
-            self.btn_play.setText("▶ Play")
+            self.btn_play.setText("▶ Воспроизвести")
+            self.btn_play.setProperty("playing", False)
+            self.btn_play.style().unpolish(self.btn_play)
+            self.btn_play.style().polish(self.btn_play)
             self.status_label.setText("⏸ Пауза")
         else:
             self.is_playing = True
             self.btn_play.setText("⏸ Пауза")
+            self.btn_play.setProperty("playing", True)
+            self.btn_play.style().unpolish(self.btn_play)
+            self.btn_play.style().polish(self.btn_play)
             self.timer.start(self.get_speed_ms())
             self.status_label.setText("▶ Воспроизведение...")
     
     def on_stop(self):
         self.is_playing = False
         self.timer.stop()
-        self.btn_play.setText("▶ Play")
+        self.btn_play.setText("▶ Воспроизвести")
+        self.btn_play.setProperty("playing", False)
+        self.btn_play.style().unpolish(self.btn_play)
+        self.btn_play.style().polish(self.btn_play)
         self.status_label.setText("⏹ Остановлен")
     
     def on_step_back(self):
@@ -495,7 +569,7 @@ class MainWindow(QMainWindow):
         if self.full_data is not None and self.current_index > 0:
             self.current_index -= 1
             self.time_slider.setValue(self.current_index)
-            self.update_chart(reset_view=False) # Не сбрасываем вид при шагах
+            self.update_chart(reset_view=False)
             self.update_time_label()
     
     def on_step_forward(self):
@@ -505,7 +579,7 @@ class MainWindow(QMainWindow):
         if self.full_data is not None and self.current_index < len(self.full_data) - 1:
             self.current_index += 1
             self.time_slider.setValue(self.current_index)
-            self.update_chart(reset_view=False) # Не сбрасываем вид при шагах
+            self.update_chart(reset_view=False)
             self.update_time_label()
     
     def play_step(self):
@@ -516,14 +590,13 @@ class MainWindow(QMainWindow):
         if self.current_index >= len(self.full_data) - 1:
             self.on_stop()
             self.status_label.setText("✅ История закончилась")
-            self.btn_play.setText("▶ Play")
+            self.btn_play.setText("▶ Воспроизвести")
             return
         
         self.current_index += 1
         self.time_slider.setValue(self.current_index)
     
     def on_load_more_data(self, timestamp_ms):
-        """Подгрузка дополнительных данных при скролле влево"""
         if self.is_playing:
             return
         
@@ -545,7 +618,6 @@ class MainWindow(QMainWindow):
             tf = self.current_tf
             
             if hasattr(self.aggregator, 'load_more'):
-                # Загружаем на 300 свечей больше
                 new_df = self.aggregator.load_more(
                     symbol=symbol,
                     interval='1m',
@@ -581,12 +653,25 @@ class MainWindow(QMainWindow):
         self.on_stop()
         event.accept()
 
+
 def main():
     from PyQt5.QtWidgets import QApplication
-    app = QApplication(sys.argv)
+    import sys
+    
+    app = QApplication(sys.argv)  # ← убрал дублирование
+    
+    # Настройка шрифтов
+    font = QFont("-apple-system", 13)
+    app.setFont(font)
+    
+    # Инициализация менеджера стилей и загрузка темы
+    style_manager = StyleManager(app)
+    style_manager.load_style('macos')  # или 'dark', 'light'
+    
     window = MainWindow()
     window.show()
     sys.exit(app.exec_())
+
 
 if __name__ == '__main__':
     main()
