@@ -255,7 +255,7 @@ class MainWindow(QMainWindow):
             self.current_position_ms = None
             
             self.update_slider()
-            self.update_chart()
+            self.update_chart(reset_view=True)  # Сбрасываем вид при первичной загрузке
             self.update_info()
             
             self.status_label.setText(f"✅ {symbol} {self.current_tf} - {total_bars} свечей")
@@ -276,7 +276,7 @@ class MainWindow(QMainWindow):
         trimmed = self.full_data.iloc[:self.current_index + 1].copy()
         return trimmed
     
-    def update_chart(self):
+    def update_chart(self, reset_view: bool = False):
         if self.full_data is None or self.full_data.empty:
             return
         
@@ -301,14 +301,11 @@ class MainWindow(QMainWindow):
         if trimmed.empty:
             return
         
-        # Отправляем этот срез данных на график
-        self.chart.set_data(trimmed)
+        # Отправляем этот срез данных на график (с флагом сброса вида или его сохранения)
+        self.chart.set_data(trimmed, reset_view=reset_view)
         
-        # Фокусируем график на последних 300 свечах этого среза
-        # Остальные 700 свечей будут доступны, если потянуть график мышкой влево
-        self.chart.show_last_bars(min(300, len(trimmed)))
+        print(f"📊 Слайдер перемещен. На график загружен буфер из {len(trimmed)} свечей (текущая точка: {self.current_index}, reset_view={reset_view})")
         
-        print(f"📊 Слайдер перемещен. На график загружен буфер из {len(trimmed)} свечей (текущая точка: {self.current_index})")
     def update_slider(self):
         if self.full_data is not None and not self.full_data.empty:
             max_val = len(self.full_data) - 1
@@ -354,7 +351,7 @@ class MainWindow(QMainWindow):
             self.on_stop()
         self.current_index = 0
         self.time_slider.setValue(0)
-        self.update_chart()
+        self.update_chart(reset_view=True)
         self.update_time_label()
     
     def go_to_end(self):
@@ -363,7 +360,7 @@ class MainWindow(QMainWindow):
         if self.full_data is not None and not self.full_data.empty:
             self.current_index = len(self.full_data) - 1
             self.time_slider.setValue(self.current_index)
-            self.update_chart()
+            self.update_chart(reset_view=True)
             self.update_time_label()
     
     def on_asset_changed(self, symbol):
@@ -435,7 +432,7 @@ class MainWindow(QMainWindow):
             # Обновляем интерфейс
             self.update_info()
             self.update_slider()
-            self.update_chart()
+            self.update_chart(reset_view=True) # Сбрасываем вид для нового ТФ
             self.chart.set_timeframe(tf)
             
             self.status_label.setText(f"✅ {self.current_symbol} {tf} - {total_bars} свечей")
@@ -456,15 +453,13 @@ class MainWindow(QMainWindow):
     def on_refresh(self):
         self.load_data(self.current_symbol, force_refresh=True)
     
-    import traceback
-
     def on_slider_changed(self, value):
         if self.full_data is None or self.full_data.empty:
             return
         
         self.current_index = min(value, len(self.full_data) - 1)
         self.update_time_label()
-        self.update_chart()
+        self.update_chart(reset_view=False) # Не сбрасываем вид при скролле слайдера
         print(f"🎯 Слайдер перемещен: {self.current_index}")
         
     def on_play(self):
@@ -474,7 +469,7 @@ class MainWindow(QMainWindow):
         if self.current_index >= len(self.full_data) - 1:
             self.current_index = max(0, len(self.full_data) - 301)
             self.time_slider.setValue(self.current_index)
-            self.update_chart()
+            self.update_chart(reset_view=True)
         
         if self.is_playing:
             self.is_playing = False
@@ -500,7 +495,7 @@ class MainWindow(QMainWindow):
         if self.full_data is not None and self.current_index > 0:
             self.current_index -= 1
             self.time_slider.setValue(self.current_index)
-            self.update_chart()
+            self.update_chart(reset_view=False) # Не сбрасываем вид при шагах
             self.update_time_label()
     
     def on_step_forward(self):
@@ -510,7 +505,7 @@ class MainWindow(QMainWindow):
         if self.full_data is not None and self.current_index < len(self.full_data) - 1:
             self.current_index += 1
             self.time_slider.setValue(self.current_index)
-            self.update_chart()
+            self.update_chart(reset_view=False) # Не сбрасываем вид при шагах
             self.update_time_label()
     
     def play_step(self):

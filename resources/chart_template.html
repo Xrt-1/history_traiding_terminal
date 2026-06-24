@@ -51,11 +51,15 @@
         let lastShowCount = 300;
         let totalDataLength = 0;
         
-        function updateChart(data) {
+        function updateChart(data, resetView) {
             if (!data || data.length === 0) {
                 console.log('⚠️ No data to display');
                 return;
             }
+            
+            // Сохраняем видимый диапазон перед обновлением данных
+            const visibleRange = chart.timeScale().getVisibleLogicalRange();
+            const oldLength = fullData.length;
             
             fullData = data.map(item => ({
                 time: Math.floor(item.time / 1000),
@@ -70,7 +74,28 @@
             console.log('📊 Data loaded:', fullData.length, 'candles');
             
             series.setData(fullData);
-            showLastBars(lastShowCount);
+            
+            // Если требуется жесткий сброс вида или данных еще не было
+            if (resetView || oldLength === 0 || !visibleRange) {
+                showLastBars(lastShowCount);
+            } else {
+                const diff = totalDataLength - oldLength;
+                
+                // Проверяем, смотрел ли пользователь на правую границу графика (включая пустоту справа)
+                if (visibleRange.to >= oldLength - 1) {
+                    // Сдвигаем диапазон на разницу свечей, сохраняя ПУСТОТУ и масштаб
+                    chart.timeScale().setVisibleLogicalRange({
+                        from: visibleRange.from + diff,
+                        to: visibleRange.to + diff
+                    });
+                } else {
+                    // Если пользователь залез в историю, то фиксируем его экран на месте
+                    chart.timeScale().setVisibleLogicalRange({
+                        from: visibleRange.from,
+                        to: visibleRange.to
+                    });
+                }
+            }
         }
         
         function appendData(newData) {
@@ -183,10 +208,6 @@
         function checkAndLoadMore() {
             return false;
         }
-        
-        // Отключаем подписку на изменения видимой области,
-        // чтобы никакие события не вызывали checkAndLoadMore
-        // chart.timeScale().subscribeVisibleLogicalRangeChange(...) - удаляем
         
         window.updateChart = updateChart;
         window.appendData = appendData;

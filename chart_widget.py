@@ -82,11 +82,15 @@ class ChartWidget(QWidget):
         let lastShowCount = 300;
         let totalDataLength = 0;
         
-        function updateChart(data) {
+        function updateChart(data, resetView) {
             if (!data || data.length === 0) {
                 console.log('⚠️ No data to display');
                 return;
             }
+            
+            // Сохраняем видимый диапазон перед обновлением данных
+            const visibleRange = chart.timeScale().getVisibleLogicalRange();
+            const oldLength = fullData.length;
             
             fullData = data.map(item => ({
                 time: Math.floor(item.time / 1000),
@@ -101,7 +105,28 @@ class ChartWidget(QWidget):
             console.log('📊 Data loaded:', fullData.length, 'candles');
             
             series.setData(fullData);
-            showLastBars(lastShowCount);
+            
+            // Если требуется жесткий сброс вида или данных еще не было
+            if (resetView || oldLength === 0 || !visibleRange) {
+                showLastBars(lastShowCount);
+            } else {
+                const diff = totalDataLength - oldLength;
+                
+                // Проверяем, смотрел ли пользователь на правую границу графика (включая пустоту справа)
+                if (visibleRange.to >= oldLength - 1) {
+                    // Сдвигаем диапазон на разницу свечей, сохраняя ПУСТОТУ и масштаб
+                    chart.timeScale().setVisibleLogicalRange({
+                        from: visibleRange.from + diff,
+                        to: visibleRange.to + diff
+                    });
+                } else {
+                    // Если пользователь залез в историю, то фиксируем его экран на месте
+                    chart.timeScale().setVisibleLogicalRange({
+                        from: visibleRange.from,
+                        to: visibleRange.to
+                    });
+                }
+            }
         }
         
         function appendData(newData) {
@@ -215,10 +240,6 @@ class ChartWidget(QWidget):
             return false;
         }
         
-        // Отключаем подписку на изменения видимой области,
-        // чтобы никакие события не вызывали checkAndLoadMore
-        // chart.timeScale().subscribeVisibleLogicalRangeChange(...) - удаляем
-        
         window.updateChart = updateChart;
         window.appendData = appendData;
         window.fitContent = fitContent;
@@ -265,16 +286,16 @@ class ChartWidget(QWidget):
         self.browser.page().runJavaScript(js_code)
         
         if self._pending_data is not None:
-            data, callback = self._pending_data
+            data, reset_view, callback = self._pending_data
             self._pending_data = None
-            self._set_data_impl(data, callback)
+            self._set_data_impl(data, reset_view, callback)
         
         if self._pending_append is not None:
             data, callback = self._pending_append
             self._pending_append = None
             self._append_data_impl(data, callback)
     
-    def _set_data_impl(self, df, callback=None):
+    def _set_data_impl(self, df, reset_view=False, callback=None):
         if df is None or df.empty:
             print("⚠️ Нет данных для отображения")
             return
@@ -288,9 +309,9 @@ class ChartWidget(QWidget):
                 item['time'] = int(item['time'])
         
         json_data = json.dumps(data)
-        js_code = f"updateChart({json_data});"
+        js_code = f"updateChart({json_data}, {'true' if reset_view else 'false'});"
         self.browser.page().runJavaScript(js_code)
-        print(f"📊 Отправлено {len(data)} свечей на график")
+        print(f"📊 Отправлено {len(data)} свечей на график (reset_view={reset_view})")
         
         if callback:
             callback()
@@ -324,12 +345,12 @@ class ChartWidget(QWidget):
         if callback:
             callback()
     
-    def set_data(self, df, callback=None):
+    def set_data(self, df, reset_view=False, callback=None):
         if not self._loaded:
             print("⏳ График загружается...")
-            self._pending_data = (df, callback)
+            self._pending_data = (df, reset_view, callback)
             return
-        self._set_data_impl(df, callback)
+        self._set_data_impl(df, reset_view, callback)
     
     def fit_content(self):
         if not self._loaded:
