@@ -287,21 +287,12 @@ class MainWindow(QMainWindow):
         if self.current_index < 0:
             self.current_index = 0
         
-        # Определяем размер окна (300 свечей)
+        # Размер окна
         window_size = 300
-        half_window = window_size // 2
         
-        # Вычисляем диапазон для отображения с центром на current_index
-        from_idx = max(0, self.current_index - half_window)
-        to_idx = min(total_bars, self.current_index + half_window + 1)  # +1 для включения последней
-        
-        # Корректируем, если окно меньше желаемого размера
-        if to_idx - from_idx < window_size:
-            # Пытаемся расширить вправо
-            to_idx = min(total_bars, from_idx + window_size)
-            # Если не хватает справа, расширяем влево
-            if to_idx - from_idx < window_size:
-                from_idx = max(0, to_idx - window_size)
+        # Индекс - это последняя свеча в окне
+        to_idx = min(total_bars, self.current_index + 1)
+        from_idx = max(0, to_idx - window_size)
         
         # Берем срез данных
         trimmed = self.full_data.iloc[from_idx:to_idx].copy()
@@ -312,11 +303,11 @@ class MainWindow(QMainWindow):
         # Отправляем данные на график
         self.chart.set_data(trimmed)
         
-        # Показываем все полученные данные (они уже обрезаны до нужного окна)
+        # Показываем все полученные данные
         self.chart.show_last_bars(len(trimmed))
         
         print(f"📊 Отображено свечей: {len(trimmed)} (индекс {self.current_index}, диапазон {from_idx}-{to_idx-1})")
-    
+
     def update_slider(self):
         if self.full_data is not None and not self.full_data.empty:
             max_val = len(self.full_data) - 1
