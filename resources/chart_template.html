@@ -27,12 +27,14 @@
                 borderColor: '#2a2e39', 
                 timeVisible: true, 
                 secondsVisible: false,
-                fixLeftEdge: true,
-                fixRightEdge: true,
+                fixLeftEdge: true,    // Запрещаем скроллить левее данных
+                fixRightEdge: false,  // РАЗРЕШАЕМ пустоту справа (будущее)
             },
             rightPriceScale: {
                 borderColor: '#2a2e39',
             },
+            handleScroll: true,
+            handleScale: true,
         });
         
         const series = chart.addCandlestickSeries({
@@ -47,6 +49,7 @@
         let fullData = [];
         let isDataLoaded = false;
         let lastShowCount = 300;
+        let totalDataLength = 0;
         
         function updateChart(data) {
             if (!data || data.length === 0) {
@@ -62,11 +65,53 @@
                 close: item.close,
             }));
             
+            totalDataLength = fullData.length;
             isDataLoaded = true;
             console.log('📊 Data loaded:', fullData.length, 'candles');
             
             series.setData(fullData);
             showLastBars(lastShowCount);
+        }
+        
+        function appendData(newData) {
+            if (!newData || newData.length === 0) return;
+            
+            const newCandles = newData.map(item => ({
+                time: Math.floor(item.time / 1000),
+                open: item.open,
+                high: item.high,
+                low: item.low,
+                close: item.close,
+            }));
+            
+            const allData = [...newCandles, ...fullData];
+            
+            const uniqueData = [];
+            const timeSet = new Set();
+            for (let i = allData.length - 1; i >= 0; i--) {
+                if (!timeSet.has(allData[i].time)) {
+                    timeSet.add(allData[i].time);
+                    uniqueData.unshift(allData[i]);
+                }
+            }
+            
+            fullData = uniqueData;
+            totalDataLength = fullData.length;
+            
+            console.log('📊 Appended data, total:', fullData.length, 'candles');
+            
+            const visibleRange = chart.timeScale().getVisibleLogicalRange();
+            
+            series.setData(fullData);
+            
+            if (visibleRange) {
+                const from = visibleRange.from + (newCandles.length);
+                const to = visibleRange.to + (newCandles.length);
+                chart.timeScale().setVisibleLogicalRange({ 
+                    from: Math.max(0, from), 
+                    to: Math.min(totalDataLength, to) 
+                });
+            }
         }
         
         function showLastBars(count) {
@@ -134,18 +179,31 @@
             }
         }
         
-        // Экспортируем функции
+        // ПОЛНОСТЬЮ ОТКЛЮЧАЕМ АВТОПОДГРУЗКУ ПРИ ПЕРЕТАСКИВАНИИ МЫШЬЮ
+        function checkAndLoadMore() {
+            return false;
+        }
+        
+        // Отключаем подписку на изменения видимой области,
+        // чтобы никакие события не вызывали checkAndLoadMore
+        // chart.timeScale().subscribeVisibleLogicalRangeChange(...) - удаляем
+        
         window.updateChart = updateChart;
+        window.appendData = appendData;
         window.fitContent = fitContent;
         window.setCurrentTime = setCurrentTime;
         window.setTimeframe = setTimeframe;
         window.getVisibleRange = getVisibleRange;
         window.showLastBars = showLastBars;
         window.setMarkers = setMarkers;
+        window.checkAndLoadMore = checkAndLoadMore;
         window.chart = chart;
         window.series = series;
         
-        // Обработка изменения размера
+        window.pyQtBridge = {
+            loadMoreData: null
+        };
+        
         window.addEventListener('resize', function() {
             chart.resize(
                 document.getElementById('chart-container').clientWidth,

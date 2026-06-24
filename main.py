@@ -120,6 +120,7 @@ class MainWindow(QMainWindow):
         
         # --- График ---
         self.chart = ChartWidget()
+        self.chart.load_more_data.connect(self.on_load_more_data)
         main_layout.addWidget(self.chart, stretch=10)
         
         # --- Нижняя панель ---
@@ -287,27 +288,27 @@ class MainWindow(QMainWindow):
         if self.current_index < 0:
             self.current_index = 0
         
-        # Размер окна
-        window_size = 300
+        # --- БУФЕР ДЛЯ РУЧНОГО СКРОЛЛА МЫШЬЮ (например, 1000 свечей) ---
+        # Это история, которая будет доступна для просмотра ЛКМ "назад"
+        history_buffer = 1000
         
-        # Индекс - это последняя свеча в окне
-        to_idx = min(total_bars, self.current_index + 1)
-        from_idx = max(0, to_idx - window_size)
+        to_idx = self.current_index + 1
+        from_idx = max(0, to_idx - history_buffer)
         
-        # Берем срез данных
+        # Вырезаем данные от прошлого до текущего момента на слайдере
         trimmed = self.full_data.iloc[from_idx:to_idx].copy()
         
         if trimmed.empty:
             return
         
-        # Отправляем данные на график
+        # Отправляем этот срез данных на график
         self.chart.set_data(trimmed)
         
-        # Показываем все полученные данные
-        self.chart.show_last_bars(len(trimmed))
+        # Фокусируем график на последних 300 свечах этого среза
+        # Остальные 700 свечей будут доступны, если потянуть график мышкой влево
+        self.chart.show_last_bars(min(300, len(trimmed)))
         
-        print(f"📊 Отображено свечей: {len(trimmed)} (индекс {self.current_index}, диапазон {from_idx}-{to_idx-1})")
-
+        print(f"📊 Слайдер перемещен. На график загружен буфер из {len(trimmed)} свечей (текущая точка: {self.current_index})")
     def update_slider(self):
         if self.full_data is not None and not self.full_data.empty:
             max_val = len(self.full_data) - 1
@@ -439,7 +440,6 @@ class MainWindow(QMainWindow):
             
             self.status_label.setText(f"✅ {self.current_symbol} {tf} - {total_bars} свечей")
 
-
     def find_nearest_index(self, timestamp_ms: int) -> int:
         if self.full_data is None or self.full_data.empty:
             return 0
@@ -526,6 +526,61 @@ class MainWindow(QMainWindow):
         
         self.current_index += 1
         self.time_slider.setValue(self.current_index)
+    
+    def on_load_more_data(self, timestamp_ms):
+        """Подгрузка дополнительных данных при скролле влево"""
+        if self.is_playing:
+            return
+        
+        if self.aggregator is None:
+            return
+        
+        print(f"🔄 Запрос на подгрузку данных до {timestamp_ms}")
+        
+        if self.full_data is not None and not self.full_data.empty:
+            first_time = self.full_data.iloc[0]['time']
+            first_timestamp = int(first_time.timestamp() * 1000)
+            
+            if timestamp_ms >= first_timestamp:
+                print("ℹ️ Данные уже загружены")
+                return
+        
+        try:
+            symbol = self.current_symbol
+            tf = self.current_tf
+            
+            if hasattr(self.aggregator, 'load_more'):
+                # Загружаем на 300 свечей больше
+                new_df = self.aggregator.load_more(
+                    symbol=symbol,
+                    interval='1m',
+                    before_time=timestamp_ms,
+                    count=300
+                )
+                
+                if new_df is not None and not new_df.empty:
+                    new_aggregated = self.aggregator.aggregate(
+                        tf,
+                        data=new_df
+                    )
+                    
+                    if not new_aggregated.empty:
+                        self.full_data = pd.concat([new_aggregated, self.full_data])
+                        self.full_data = self.full_data.drop_duplicates(subset=['time'])
+                        self.full_data = self.full_data.sort_values('time').reset_index(drop=True)
+                        
+                        self.chart.append_data(new_aggregated)
+                        self.update_info()
+                        self.update_slider()
+                        
+                        print(f"✅ Загружено {len(new_aggregated)} дополнительных свечей")
+                        self.status_label.setText(f"📥 Загружено {len(new_aggregated)} свечей")
+            else:
+                print("⚠️ Метод load_more не реализован в DataAggregator")
+                    
+        except Exception as e:
+            print(f"❌ Ошибка при подгрузке данных: {e}")
+            self.status_label.setText(f"❌ Ошибка подгрузки")
     
     def closeEvent(self, event):
         self.on_stop()

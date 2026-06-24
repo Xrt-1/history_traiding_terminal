@@ -7,6 +7,7 @@ import pandas as pd
 
 class ChartWidget(QWidget):
     time_selected = pyqtSignal(str)
+    load_more_data = pyqtSignal(int)  # Сигнал для запроса загрузки данных
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -25,6 +26,7 @@ class ChartWidget(QWidget):
         
         self._loaded = False
         self._pending_data = None
+        self._pending_append = None
         
     def create_default_html(self, path):
         html_content = """<!DOCTYPE html>
@@ -56,12 +58,14 @@ class ChartWidget(QWidget):
                 borderColor: '#2a2e39', 
                 timeVisible: true, 
                 secondsVisible: false,
-                fixLeftEdge: true,
-                fixRightEdge: true,
+                fixLeftEdge: true,    // Запрещаем скроллить левее данных
+                fixRightEdge: false,  // РАЗРЕШАЕМ пустоту справа (будущее)
             },
             rightPriceScale: {
                 borderColor: '#2a2e39',
             },
+            handleScroll: true,
+            handleScale: true,
         });
         
         const series = chart.addCandlestickSeries({
@@ -76,6 +80,7 @@ class ChartWidget(QWidget):
         let fullData = [];
         let isDataLoaded = false;
         let lastShowCount = 300;
+        let totalDataLength = 0;
         
         function updateChart(data) {
             if (!data || data.length === 0) {
@@ -91,11 +96,53 @@ class ChartWidget(QWidget):
                 close: item.close,
             }));
             
+            totalDataLength = fullData.length;
             isDataLoaded = true;
             console.log('📊 Data loaded:', fullData.length, 'candles');
             
             series.setData(fullData);
             showLastBars(lastShowCount);
+        }
+        
+        function appendData(newData) {
+            if (!newData || newData.length === 0) return;
+            
+            const newCandles = newData.map(item => ({
+                time: Math.floor(item.time / 1000),
+                open: item.open,
+                high: item.high,
+                low: item.low,
+                close: item.close,
+            }));
+            
+            const allData = [...newCandles, ...fullData];
+            
+            const uniqueData = [];
+            const timeSet = new Set();
+            for (let i = allData.length - 1; i >= 0; i--) {
+                if (!timeSet.has(allData[i].time)) {
+                    timeSet.add(allData[i].time);
+                    uniqueData.unshift(allData[i]);
+                }
+            }
+            
+            fullData = uniqueData;
+            totalDataLength = fullData.length;
+            
+            console.log('📊 Appended data, total:', fullData.length, 'candles');
+            
+            const visibleRange = chart.timeScale().getVisibleLogicalRange();
+            
+            series.setData(fullData);
+            
+            if (visibleRange) {
+                const from = visibleRange.from + (newCandles.length);
+                const to = visibleRange.to + (newCandles.length);
+                chart.timeScale().setVisibleLogicalRange({ 
+                    from: Math.max(0, from), 
+                    to: Math.min(totalDataLength, to) 
+                });
+            }
         }
         
         function showLastBars(count) {
@@ -163,18 +210,31 @@ class ChartWidget(QWidget):
             }
         }
         
-        // Экспортируем функции
+        // ПОЛНОСТЬЮ ОТКЛЮЧАЕМ АВТОПОДГРУЗКУ ПРИ ПЕРЕТАСКИВАНИИ МЫШЬЮ
+        function checkAndLoadMore() {
+            return false;
+        }
+        
+        // Отключаем подписку на изменения видимой области,
+        // чтобы никакие события не вызывали checkAndLoadMore
+        // chart.timeScale().subscribeVisibleLogicalRangeChange(...) - удаляем
+        
         window.updateChart = updateChart;
+        window.appendData = appendData;
         window.fitContent = fitContent;
         window.setCurrentTime = setCurrentTime;
         window.setTimeframe = setTimeframe;
         window.getVisibleRange = getVisibleRange;
         window.showLastBars = showLastBars;
         window.setMarkers = setMarkers;
+        window.checkAndLoadMore = checkAndLoadMore;
         window.chart = chart;
         window.series = series;
         
-        // Обработка изменения размера
+        window.pyQtBridge = {
+            loadMoreData: null
+        };
+        
         window.addEventListener('resize', function() {
             chart.resize(
                 document.getElementById('chart-container').clientWidth,
@@ -194,10 +254,25 @@ class ChartWidget(QWidget):
         self._loaded = True
         print("✅ График загружен")
         
+        js_code = """
+        (function() {
+            window.pyQtBridge.loadMoreData = function(timestamp) {
+                console.log('loadMoreData: ' + timestamp);
+                return true;
+            };
+        })();
+        """
+        self.browser.page().runJavaScript(js_code)
+        
         if self._pending_data is not None:
             data, callback = self._pending_data
             self._pending_data = None
             self._set_data_impl(data, callback)
+        
+        if self._pending_append is not None:
+            data, callback = self._pending_append
+            self._pending_append = None
+            self._append_data_impl(data, callback)
     
     def _set_data_impl(self, df, callback=None):
         if df is None or df.empty:
@@ -216,6 +291,35 @@ class ChartWidget(QWidget):
         js_code = f"updateChart({json_data});"
         self.browser.page().runJavaScript(js_code)
         print(f"📊 Отправлено {len(data)} свечей на график")
+        
+        if callback:
+            callback()
+    
+    def append_data(self, df, callback=None):
+        """Добавление новых данных к существующим (для подгрузки истории)"""
+        if not self._loaded:
+            print("⏳ График загружается...")
+            self._pending_append = (df, callback)
+            return
+        self._append_data_impl(df, callback)
+    
+    def _append_data_impl(self, df, callback=None):
+        if df is None or df.empty:
+            print("⚠️ Нет данных для добавления")
+            return
+        
+        data = df[['time', 'open', 'high', 'low', 'close']].to_dict('records')
+        
+        for item in data:
+            if isinstance(item['time'], pd.Timestamp):
+                item['time'] = int(item['time'].timestamp() * 1000)
+            else:
+                item['time'] = int(item['time'])
+        
+        json_data = json.dumps(data)
+        js_code = f"appendData({json_data});"
+        self.browser.page().runJavaScript(js_code)
+        print(f"📊 Добавлено {len(data)} свечей к графику")
         
         if callback:
             callback()
