@@ -1,18 +1,84 @@
+<!-- name: chart_template.html -->
 <!DOCTYPE html>
 <html>
 <head>
     <meta charset="UTF-8">
     <title>Chart</title>
     <style>
-        body { margin: 0; padding: 0; background: #1e222d; overflow: hidden; }
-        #chart-container { width: 100vw; height: 100vh; }
+        body { margin: 0; padding: 0; background: #1e222d; overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+        #chart-container { position: relative; width: 100vw; height: 100vh; }
+        #chart-library-container { width: 100%; height: 100%; }
+        
+        /* Панель инструментов рисования (TradingView Style) */
+        #drawing-toolbar {
+            position: absolute;
+            left: 10px;
+            top: 10px;
+            z-index: 20;
+            background: #1c2030;
+            border: 1px solid #2b304a;
+            border-radius: 6px;
+            padding: 6px 4px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+        }
+        .toolbar-btn {
+            background: transparent;
+            border: none;
+            color: #b2b5be;
+            padding: 6px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 32px;
+            height: 32px;
+            transition: all 0.15s ease;
+        }
+        .toolbar-btn:hover {
+            background: #2a2e45;
+            color: #fff;
+        }
+        .toolbar-btn.active {
+            background: #2962ff;
+            color: #fff;
+        }
+        .toolbar-btn:active {
+            transform: scale(0.95);
+        }
     </style>
 </head>
 <body>
-    <div id="chart-container"></div>
+    <div id="chart-container">
+        <!-- Контейнер Lightweight Charts -->
+        <div id="chart-library-container"></div>
+        
+        <!-- Панель инструментов -->
+        <div id="drawing-toolbar">
+            <button class="toolbar-btn active" id="tool-cursor" title="Указатель (Выбор/Перемещение)">🖱️</button>
+            <button class="toolbar-btn" id="tool-line" title="Горизонтальная линия">➖</button>
+            <button class="toolbar-btn" id="tool-rect" title="Прямоугольник">⬜</button>
+            <button class="toolbar-btn" id="tool-long" title="Длинная позиция (Long)">📈</button>
+            <button class="toolbar-btn" id="tool-short" title="Короткая позиция (Short)">📉</button>
+            <hr style="border: 0; border-top: 1px solid #2b304a; margin: 2px 0; width: 100%;">
+            <button class="toolbar-btn" id="tool-delete" title="Удалить выделенное (Del / Backspace)" style="color: #ef5350;">🗑️</button>
+            <button class="toolbar-btn" id="tool-clear" title="Очистить всё" style="color: #ef5350; font-size: 13px;">💥</button>
+        </div>
+        
+        <!-- Холст для рисования фигур -->
+        <canvas id="drawing-canvas" style="position: absolute; top: 0; left: 0; pointer-events: none; z-index: 5;"></canvas>
+        
+        <!-- Интерактивный прозрачный слой для обработки мыши -->
+        <div id="interaction-layer" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 10; pointer-events: none;"></div-->
+    </div>
+
     <script src="https://unpkg.com/lightweight-charts@4.0.0/dist/lightweight-charts.standalone.production.js"></script>
     <script>
-        const chart = LightweightCharts.createChart(document.getElementById('chart-container'), {
+        const chart = LightweightCharts.createChart(document.getElementById('chart-library-container'), {
             width: document.getElementById('chart-container').clientWidth,
             height: document.getElementById('chart-container').clientHeight,
             layout: { 
@@ -27,8 +93,8 @@
                 borderColor: '#2a2e39', 
                 timeVisible: true, 
                 secondsVisible: false,
-                fixLeftEdge: true,    // Запрещаем скроллить левее данных
-                fixRightEdge: false,  // РАЗРЕШАЕМ пустоту справа (будущее)
+                fixLeftEdge: true,
+                fixRightEdge: false,
             },
             rightPriceScale: {
                 borderColor: '#2a2e39',
@@ -57,7 +123,6 @@
                 return;
             }
             
-            // Сохраняем видимый диапазон перед обновлением данных
             const visibleRange = chart.timeScale().getVisibleLogicalRange();
             const oldLength = fullData.length;
             
@@ -75,27 +140,23 @@
             
             series.setData(fullData);
             
-            // Если требуется жесткий сброс вида или данных еще не было
             if (resetView || oldLength === 0 || !visibleRange) {
                 showLastBars(lastShowCount);
             } else {
                 const diff = totalDataLength - oldLength;
-                
-                // Проверяем, смотрел ли пользователь на правую границу графика (включая пустоту справа)
                 if (visibleRange.to >= oldLength - 1) {
-                    // Сдвигаем диапазон на разницу свечей, сохраняя ПУСТОТУ и масштаб
                     chart.timeScale().setVisibleLogicalRange({
                         from: visibleRange.from + diff,
                         to: visibleRange.to + diff
                     });
                 } else {
-                    // Если пользователь залез в историю, то фиксируем его экран на месте
                     chart.timeScale().setVisibleLogicalRange({
                         from: visibleRange.from,
                         to: visibleRange.to
                     });
                 }
             }
+            requestAnimationFrame(drawAll);
         }
         
         function appendData(newData) {
@@ -137,6 +198,7 @@
                     to: Math.min(totalDataLength, to) 
                 });
             }
+            requestAnimationFrame(drawAll);
         }
         
         function showLastBars(count) {
@@ -153,6 +215,7 @@
                 });
                 console.log('📊 Showing last', barsToShow, 'bars (total:', total, ')');
             }
+            requestAnimationFrame(drawAll);
         }
         
         function setCurrentTime(timestamp) {
@@ -178,17 +241,20 @@
             
             chart.timeScale().setVisibleLogicalRange({ from: from, to: to });
             console.log('📍 Set time to index:', index);
+            requestAnimationFrame(drawAll);
         }
         
         function fitContent() {
             if (!isDataLoaded || fullData.length === 0) return;
             chart.timeScale().fitContent();
+            requestAnimationFrame(drawAll);
         }
         
         function setTimeframe(tf) { 
             console.log('TF changed:', tf);
             setTimeout(function() {
                 showLastBars(lastShowCount);
+                drawAll();
             }, 100);
         }
         
@@ -204,7 +270,6 @@
             }
         }
         
-        // ПОЛНОСТЬЮ ОТКЛЮЧАЕМ АВТОПОДГРУЗКУ ПРИ ПЕРЕТАСКИВАНИИ МЫШЬЮ
         function checkAndLoadMore() {
             return false;
         }
@@ -225,13 +290,613 @@
             loadMoreData: null
         };
         
-        window.addEventListener('resize', function() {
+        // --- ДВИЖОК ИНТЕРАКТИВНОГО РИСОВАНИЯ (CANVAS) ---
+        const canvas = document.getElementById('drawing-canvas');
+        const ctx = canvas.getContext('2d');
+        const interactionLayer = document.getElementById('interaction-layer');
+        
+        let activeTool = 'cursor'; 
+        let figures = [];
+        let selectedFigureId = null;
+        
+        let draggedFigure = null;
+        let draggedPart = null;
+        let startState = {};
+        
+        function getBarDurationSeconds() {
+            if (fullData && fullData.length >= 2) {
+                return Math.abs(fullData[1].time - fullData[0].time);
+            }
+            return 3600; 
+        }
+        
+        function timeToX(time) {
+            let x = chart.timeScale().timeToCoordinate(time);
+            if (x !== null) return x;
+            if (fullData.length === 0) return null;
+            
+            const lastCandle = fullData[fullData.length - 1];
+            const lastX = chart.timeScale().timeToCoordinate(lastCandle.time);
+            if (lastX === null) return null;
+            
+            const barSpacing = chart.timeScale().getBarSpacing ? chart.timeScale().getBarSpacing() : 6;
+            const candleDuration = getBarDurationSeconds();
+            
+            const diffSeconds = time - lastCandle.time;
+            const diffBars = diffSeconds / candleDuration;
+            return lastX + diffBars * barSpacing;
+        }
+        
+        function xToTime(x) {
+            let t = chart.timeScale().coordinateToTime(x);
+            if (t !== null) return t;
+            if (fullData.length === 0) return null;
+            
+            const lastCandle = fullData[fullData.length - 1];
+            const lastX = chart.timeScale().timeToCoordinate(lastCandle.time);
+            if (lastX === null) return null;
+            
+            const barSpacing = chart.timeScale().getBarSpacing ? chart.timeScale().getBarSpacing() : 6;
+            const candleDuration = getBarDurationSeconds();
+            
+            const diffBars = (x - lastX) / barSpacing;
+            const diffSeconds = diffBars * candleDuration;
+            return lastCandle.time + Math.round(diffSeconds);
+        }
+        
+        function resizeCanvas() {
+            canvas.width = document.getElementById('chart-container').clientWidth;
+            canvas.height = document.getElementById('chart-container').clientHeight;
+            drawAll();
+        }
+        window.addEventListener('resize', () => {
             chart.resize(
                 document.getElementById('chart-container').clientWidth,
                 document.getElementById('chart-container').clientHeight
             );
+            resizeCanvas();
         });
         
+        function findTarget(mouseX, mouseY) {
+            if (figures.length === 0) return null;
+            const handleSize = 8;
+            
+            for (let i = figures.length - 1; i >= 0; i--) {
+                const fig = figures[i];
+                if (!fig.selected) continue;
+                
+                if (fig.type === 'rectangle') {
+                    const x1 = timeToX(fig.timeStart);
+                    const x2 = timeToX(fig.timeEnd);
+                    const y1 = series.priceToCoordinate(fig.priceStart);
+                    const y2 = series.priceToCoordinate(fig.priceEnd);
+                    
+                    if (x1 !== null && x2 !== null && y1 !== null && y2 !== null) {
+                        if (Math.abs(mouseX - x1) < handleSize && Math.abs(mouseY - y1) < handleSize) 
+                            return { figure: fig, part: 'tl', cursor: 'nwse-resize' };
+                        if (Math.abs(mouseX - x2) < handleSize && Math.abs(mouseY - y1) < handleSize) 
+                            return { figure: fig, part: 'tr', cursor: 'nesw-resize' };
+                        if (Math.abs(mouseX - x1) < handleSize && Math.abs(mouseY - y2) < handleSize) 
+                            return { figure: fig, part: 'bl', cursor: 'nesw-resize' };
+                        if (Math.abs(mouseX - x2) < handleSize && Math.abs(mouseY - y2) < handleSize) 
+                            return { figure: fig, part: 'br', cursor: 'nwse-resize' };
+                        
+                        if (Math.abs(mouseX - (x1+x2)/2) < handleSize && Math.abs(mouseY - y1) < handleSize) 
+                            return { figure: fig, part: 'top', cursor: 'ns-resize' };
+                        if (Math.abs(mouseX - (x1+x2)/2) < handleSize && Math.abs(mouseY - y2) < handleSize) 
+                            return { figure: fig, part: 'bottom', cursor: 'ns-resize' };
+                        if (Math.abs(mouseX - x1) < handleSize && Math.abs(mouseY - (y1+y2)/2) < handleSize) 
+                            return { figure: fig, part: 'left', cursor: 'ew-resize' };
+                        if (Math.abs(mouseX - x2) < handleSize && Math.abs(mouseY - (y1+y2)/2) < handleSize) 
+                            return { figure: fig, part: 'right', cursor: 'ew-resize' };
+                    }
+                } 
+                else if (fig.type === 'long_position' || fig.type === 'short_position') {
+                    const x1 = timeToX(fig.timeStart);
+                    const x2 = timeToX(fig.timeEnd);
+                    const yEntry = series.priceToCoordinate(fig.entry);
+                    const yTp = series.priceToCoordinate(fig.tp);
+                    const ySl = series.priceToCoordinate(fig.sl);
+                    
+                    if (x1 !== null && x2 !== null && yEntry !== null && yTp !== null && ySl !== null) {
+                        const xMid = (x1 + x2) / 2;
+                        if (Math.abs(mouseX - xMid) < handleSize && Math.abs(mouseY - yTp) < handleSize) 
+                            return { figure: fig, part: 'tp', cursor: 'ns-resize' };
+                        if (Math.abs(mouseX - xMid) < handleSize && Math.abs(mouseY - yEntry) < handleSize) 
+                            return { figure: fig, part: 'entry', cursor: 'ns-resize' };
+                        if (Math.abs(mouseX - xMid) < handleSize && Math.abs(mouseY - ySl) < handleSize) 
+                            return { figure: fig, part: 'sl', cursor: 'ns-resize' };
+                        if (Math.abs(mouseX - x1) < handleSize && Math.abs(mouseY - yEntry) < handleSize) 
+                            return { figure: fig, part: 'left', cursor: 'ew-resize' };
+                        if (Math.abs(mouseX - x2) < handleSize && Math.abs(mouseY - yEntry) < handleSize) 
+                            return { figure: fig, part: 'right', cursor: 'ew-resize' };
+                    }
+                }
+            }
+            
+            for (let i = figures.length - 1; i >= 0; i--) {
+                const fig = figures[i];
+                
+                if (fig.type === 'horizontal_line') {
+                    const y = series.priceToCoordinate(fig.price);
+                    if (y !== null && Math.abs(mouseY - y) < 8) {
+                        return { figure: fig, part: 'line', cursor: 'ns-resize' };
+                    }
+                } 
+                else if (fig.type === 'rectangle') {
+                    const x1 = timeToX(fig.timeStart);
+                    const x2 = timeToX(fig.timeEnd);
+                    const y1 = series.priceToCoordinate(fig.priceStart);
+                    const y2 = series.priceToCoordinate(fig.priceEnd);
+                    
+                    if (x1 !== null && x2 !== null && y1 !== null && y2 !== null) {
+                        const minX = Math.min(x1, x2);
+                        const maxX = Math.max(x1, x2);
+                        const minY = Math.min(y1, y2);
+                        const maxY = Math.max(y1, y2);
+                        if (mouseX >= minX && mouseX <= maxX && mouseY >= minY && mouseY <= maxY) {
+                            return { figure: fig, part: 'body', cursor: 'move' };
+                        }
+                    }
+                } 
+                else if (fig.type === 'long_position' || fig.type === 'short_position') {
+                    const x1 = timeToX(fig.timeStart);
+                    const x2 = timeToX(fig.timeEnd);
+                    const yEntry = series.priceToCoordinate(fig.entry);
+                    const yTp = series.priceToCoordinate(fig.tp);
+                    const ySl = series.priceToCoordinate(fig.sl);
+                    
+                    if (x1 !== null && x2 !== null && yEntry !== null && yTp !== null && ySl !== null) {
+                        const minX = Math.min(x1, x2);
+                        const maxX = Math.max(x1, x2);
+                        const minY = Math.min(yTp, yEntry, ySl);
+                        const maxY = Math.max(yTp, yEntry, ySl);
+                        if (mouseX >= minX && mouseX <= maxX && mouseY >= minY && mouseY <= maxY) {
+                            return { figure: fig, part: 'body', cursor: 'move' };
+                        }
+                    }
+                }
+            }
+            
+            return null;
+        }
+        
+        function drawAll() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            figures.forEach(fig => {
+                if (fig.type === 'horizontal_line') {
+                    const y = series.priceToCoordinate(fig.price);
+                    if (y === null) return;
+                    
+                    ctx.strokeStyle = fig.selected ? '#2962ff' : '#2962ffb3';
+                    ctx.lineWidth = fig.selected ? 2 : 1.5;
+                    ctx.setLineDash(fig.selected ? [5, 5] : []);
+                    
+                    ctx.beginPath();
+                    ctx.moveTo(0, y);
+                    ctx.lineTo(canvas.width - 60, y); 
+                    ctx.stroke();
+                    ctx.setLineDash([]);
+                    
+                    ctx.fillStyle = fig.selected ? '#2962ff' : '#1e222d';
+                    ctx.strokeStyle = '#2962ff';
+                    ctx.lineWidth = 1;
+                    const text = fig.price.toFixed(2);
+                    const rightEdge = canvas.width - 60;
+                    ctx.fillRect(rightEdge, y - 9, 60, 18);
+                    ctx.strokeRect(rightEdge, y - 9, 60, 18);
+                    
+                    ctx.fillStyle = '#ffffff';
+                    ctx.font = '10px Arial';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText(text, rightEdge + 30, y);
+                } 
+                else if (fig.type === 'rectangle') {
+                    const x1 = timeToX(fig.timeStart);
+                    const x2 = timeToX(fig.timeEnd);
+                    const y1 = series.priceToCoordinate(fig.priceStart);
+                    const y2 = series.priceToCoordinate(fig.priceEnd);
+                    
+                    if (x1 === null || x2 === null || y1 === null || y2 === null) return;
+                    
+                    const x = Math.min(x1, x2);
+                    const y = Math.min(y1, y2);
+                    const w = Math.abs(x2 - x1);
+                    const h = Math.abs(y2 - y1);
+                    
+                    ctx.fillStyle = fig.color || 'rgba(41, 98, 255, 0.15)';
+                    ctx.fillRect(x, y, w, h);
+                    
+                    ctx.strokeStyle = fig.selected ? '#2962ff' : (fig.borderColor || '#2962ff');
+                    ctx.lineWidth = fig.selected ? 2 : 1.5;
+                    ctx.strokeRect(x, y, w, h);
+                    
+                    if (fig.selected) {
+                        drawHandle(x1, y1);
+                        drawHandle(x2, y1);
+                        drawHandle(x1, y2);
+                        drawHandle(x2, y2);
+                        drawHandle((x1+x2)/2, y1);
+                        drawHandle((x1+x2)/2, y2);
+                        drawHandle(x1, (y1+y2)/2);
+                        drawHandle(x2, (y1+y2)/2);
+                    }
+                } 
+                else if (fig.type === 'long_position' || fig.type === 'short_position') {
+                    const x1 = timeToX(fig.timeStart);
+                    const x2 = timeToX(fig.timeEnd);
+                    const yEntry = series.priceToCoordinate(fig.entry);
+                    const yTp = series.priceToCoordinate(fig.tp);
+                    const ySl = series.priceToCoordinate(fig.sl);
+                    
+                    if (x1 === null || x2 === null || yEntry === null || yTp === null || ySl === null) return;
+                    
+                    const x = Math.min(x1, x2);
+                    const w = Math.abs(x2 - x1);
+                    const isLong = fig.type === 'long_position';
+                    
+                    let yProfitTop, hProfit, yLossTop, hLoss;
+                    if (isLong) {
+                        yProfitTop = Math.min(yTp, yEntry);
+                        hProfit = Math.abs(yEntry - yTp);
+                        yLossTop = Math.min(yEntry, ySl);
+                        hLoss = Math.abs(ySl - yEntry);
+                    } else {
+                        yProfitTop = Math.min(yEntry, yTp);
+                        hProfit = Math.abs(yTp - yEntry);
+                        yLossTop = Math.min(ySl, yEntry);
+                        hLoss = Math.abs(yEntry - ySl);
+                    }
+                    
+                    ctx.fillStyle = 'rgba(38, 166, 154, 0.22)';
+                    ctx.fillRect(x, yProfitTop, w, hProfit);
+                    ctx.strokeStyle = '#26a69a';
+                    ctx.lineWidth = 1;
+                    ctx.strokeRect(x, yProfitTop, w, hProfit);
+                    
+                    ctx.fillStyle = 'rgba(239, 83, 80, 0.22)';
+                    ctx.fillRect(x, yLossTop, w, hLoss);
+                    ctx.strokeStyle = '#ef5350';
+                    ctx.lineWidth = 1;
+                    ctx.strokeRect(x, yLossTop, w, hLoss);
+                    
+                    ctx.strokeStyle = '#eceff1';
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    ctx.moveTo(x, yEntry);
+                    ctx.lineTo(x + w, yEntry);
+                    ctx.stroke();
+                    
+                    const r_risk = Math.abs(fig.entry - fig.sl);
+                    const r_reward = Math.abs(fig.tp - fig.entry);
+                    const rr_ratio = r_risk > 0 ? (r_reward / r_risk).toFixed(2) : '0.00';
+                    
+                    const badgeW = 130;
+                    const badgeH = 22;
+                    const badgeX = x + w/2 - badgeW/2;
+                    const badgeY = yEntry - badgeH/2;
+                    
+                    ctx.fillStyle = '#1e222d';
+                    ctx.strokeStyle = '#45495e';
+                    ctx.lineWidth = 1.5;
+                    ctx.beginPath();
+                    if (ctx.roundRect) ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 4);
+                    else ctx.rect(badgeX, badgeY, badgeW, badgeH);
+                    ctx.fill();
+                    ctx.stroke();
+                    
+                    ctx.fillStyle = '#ffffff';
+                    ctx.font = 'bold 10px Arial';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText(`Риск/Прибыль: ${rr_ratio}`, x + w/2, yEntry);
+                    
+                    ctx.fillStyle = '#26a69a';
+                    ctx.font = '10px Arial';
+                    const profitPercent = ((Math.abs(fig.tp - fig.entry) / fig.entry) * 100).toFixed(2);
+                    ctx.fillText(`Тейк: ${fig.tp.toFixed(2)} (+${profitPercent}%)`, x + w/2, yProfitTop + hProfit/2);
+                    
+                    ctx.fillStyle = '#ef5350';
+                    const lossPercent = ((Math.abs(fig.sl - fig.entry) / fig.entry) * 100).toFixed(2);
+                    ctx.fillText(`Стоп: ${fig.sl.toFixed(2)} (-${lossPercent}%)`, x + w/2, yLossTop + hLoss/2);
+                    
+                    ctx.textAlign = 'left';
+                    ctx.textBaseline = 'alphabetic';
+                    
+                    if (fig.selected) {
+                        const xMid = (x1 + x2) / 2;
+                        drawHandle(xMid, yTp);
+                        drawHandle(xMid, yEntry);
+                        drawHandle(xMid, ySl);
+                        drawHandle(x1, yEntry);
+                        drawHandle(x2, yEntry);
+                    }
+                }
+            });
+        }
+        
+        function drawHandle(x, y) {
+            ctx.fillStyle = '#ffffff';
+            ctx.strokeStyle = '#2962ff';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(x, y, 4, 0, 2 * Math.PI);
+            ctx.fill();
+            ctx.stroke();
+        }
+        
+        // Подписка на обновление масштаба и скролла графика (БЕЗ краша priceScale)
+        chart.timeScale().subscribeVisibleLogicalRangeChange(() => requestAnimationFrame(drawAll));
+        
+        // --- ОБРАБОТКА ДВИЖЕНИЯ МЫШИ (Глобальная через document) ---
+        document.addEventListener('mousemove', (e) => {
+            const rect = interactionLayer.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            const mouseY = e.clientY - rect.top;
+            
+            if (draggedFigure) {
+                const currentPrice = series.coordinateToPrice(mouseY);
+                const currentTime = xToTime(mouseX);
+                
+                if (currentPrice === null || currentTime === null) return;
+                
+                const deltaPrice = currentPrice - startState.mousePrice;
+                const deltaTime = currentTime - startState.mouseTime;
+                
+                if (draggedFigure.type === 'horizontal_line') {
+                    draggedFigure.price = currentPrice;
+                } 
+                else if (draggedFigure.type === 'rectangle') {
+                    if (draggedPart === 'body') {
+                        draggedFigure.priceStart = startState.priceStart + deltaPrice;
+                        draggedFigure.priceEnd = startState.priceEnd + deltaPrice;
+                        draggedFigure.timeStart = startState.timeStart + deltaTime;
+                        draggedFigure.timeEnd = startState.timeEnd + deltaTime;
+                    } else if (draggedPart === 'tl') {
+                        draggedFigure.timeStart = currentTime;
+                        draggedFigure.priceStart = currentPrice;
+                    } else if (draggedPart === 'tr') {
+                        draggedFigure.timeEnd = currentTime;
+                        draggedFigure.priceStart = currentPrice;
+                    } else if (draggedPart === 'bl') {
+                        draggedFigure.timeStart = currentTime;
+                        draggedFigure.priceEnd = currentPrice;
+                    } else if (draggedPart === 'br') {
+                        draggedFigure.timeEnd = currentTime;
+                        draggedFigure.priceEnd = currentPrice;
+                    } else if (draggedPart === 'top') {
+                        draggedFigure.priceStart = currentPrice;
+                    } else if (draggedPart === 'bottom') {
+                        draggedFigure.priceEnd = currentPrice;
+                    } else if (draggedPart === 'left') {
+                        draggedFigure.timeStart = currentTime;
+                    } else if (draggedPart === 'right') {
+                        draggedFigure.timeEnd = currentTime;
+                    }
+                } 
+                else if (draggedFigure.type === 'long_position' || draggedFigure.type === 'short_position') {
+                    if (draggedPart === 'body') {
+                        draggedFigure.entry = startState.entry + deltaPrice;
+                        draggedFigure.tp = startState.tp + deltaPrice;
+                        draggedFigure.sl = startState.sl + deltaPrice;
+                        draggedFigure.timeStart = startState.timeStart + deltaTime;
+                        draggedFigure.timeEnd = startState.timeEnd + deltaTime;
+                    } else if (draggedPart === 'tp') {
+                        draggedFigure.tp = currentPrice;
+                    } else if (draggedPart === 'sl') {
+                        draggedFigure.sl = currentPrice;
+                    } else if (draggedPart === 'entry') {
+                        draggedFigure.entry = currentPrice;
+                    } else if (draggedPart === 'left') {
+                        draggedFigure.timeStart = currentTime;
+                    } else if (draggedPart === 'right') {
+                        draggedFigure.timeEnd = currentTime;
+                    }
+                }
+                requestAnimationFrame(drawAll);
+                return;
+            }
+            
+            // Проверка нахождения мыши внутри графика
+            const isInside = mouseX >= 0 && mouseX <= rect.width && mouseY >= 0 && mouseY <= rect.height;
+            if (!isInside) {
+                interactionLayer.style.pointerEvents = 'none';
+                return;
+            }
+            
+            if (activeTool !== 'cursor') {
+                interactionLayer.style.pointerEvents = 'auto';
+                interactionLayer.style.cursor = 'crosshair';
+                return;
+            }
+            
+            const target = findTarget(mouseX, mouseY);
+            if (target) {
+                interactionLayer.style.pointerEvents = 'auto';
+                interactionLayer.style.cursor = target.cursor;
+            } else {
+                interactionLayer.style.pointerEvents = 'none';
+                interactionLayer.style.cursor = 'default';
+            }
+        });
+        
+        interactionLayer.addEventListener('mousedown', (e) => {
+            const rect = interactionLayer.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            const mouseY = e.clientY - rect.top;
+            
+            if (activeTool !== 'cursor') {
+                const price = series.coordinateToPrice(mouseY);
+                const time = xToTime(mouseX);
+                
+                if (price !== null && time !== null) {
+                    createFigure(activeTool, price, time);
+                    activeTool = 'cursor';
+                    updateToolbarUI();
+                }
+                drawAll();
+                return;
+            }
+            
+            const target = findTarget(mouseX, mouseY);
+            if (target) {
+                figures.forEach(f => f.selected = false);
+                target.figure.selected = true;
+                selectedFigureId = target.figure.id;
+                
+                draggedFigure = target.figure;
+                draggedPart = target.part;
+                
+                startState = {
+                    mousePrice: series.coordinateToPrice(mouseY),
+                    mouseTime: xToTime(mouseX),
+                    price: draggedFigure.price,
+                    priceStart: draggedFigure.priceStart,
+                    priceEnd: draggedFigure.priceEnd,
+                    timeStart: draggedFigure.timeStart,
+                    timeEnd: draggedFigure.timeEnd,
+                    entry: draggedFigure.entry,
+                    tp: draggedFigure.tp,
+                    sl: draggedFigure.sl
+                };
+                drawAll();
+            } else {
+                let changed = false;
+                figures.forEach(f => {
+                    if (f.selected) {
+                        f.selected = false;
+                        changed = true;
+                    }
+                });
+                if (changed) {
+                    selectedFigureId = null;
+                    drawAll();
+                }
+            }
+        });
+        
+        window.addEventListener('mouseup', () => {
+            draggedFigure = null;
+            draggedPart = null;
+        });
+        
+        function createFigure(tool, price, time) {
+            figures.forEach(f => f.selected = false);
+            const id = 'fig_' + Date.now();
+            const candleDuration = getBarDurationSeconds();
+            
+            if (tool === 'horizontal_line') {
+                figures.push({
+                    id: id,
+                    type: 'horizontal_line',
+                    price: price,
+                    selected: true
+                });
+            } 
+            else if (tool === 'rectangle') {
+                const height = price * 0.015;
+                const width = 20 * candleDuration;
+                figures.push({
+                    id: id,
+                    type: 'rectangle',
+                    timeStart: time,
+                    timeEnd: time + width,
+                    priceStart: price + height,
+                    priceEnd: price - height,
+                    color: 'rgba(41, 98, 255, 0.15)',
+                    borderColor: '#2962ff',
+                    selected: true
+                });
+            } 
+            else if (tool === 'long_position') {
+                const width = 30 * candleDuration;
+                figures.push({
+                    id: id,
+                    type: 'long_position',
+                    timeStart: time,
+                    timeEnd: time + width,
+                    entry: price,
+                    tp: price * 1.03,
+                    sl: price * 0.985,
+                    selected: true
+                });
+            } 
+            else if (tool === 'short_position') {
+                const width = 30 * candleDuration;
+                figures.push({
+                    id: id,
+                    type: 'short_position',
+                    timeStart: time,
+                    timeEnd: time + width,
+                    entry: price,
+                    tp: price * 0.97,
+                    sl: price * 1.015,
+                    selected: true
+                });
+            }
+            selectedFigureId = id;
+        }
+        
+        function deleteSelectedFigure() {
+            if (selectedFigureId) {
+                figures = figures.filter(f => f.id !== selectedFigureId);
+                selectedFigureId = null;
+                drawAll();
+            }
+        }
+        
+        function clearAllFigures() {
+            figures = [];
+            selectedFigureId = null;
+            drawAll();
+        }
+        
+        window.addEventListener('keydown', (e) => {
+            if (e.key === 'Delete' || e.key === 'Backspace') {
+                deleteSelectedFigure();
+            }
+        });
+        
+        const tools = {
+            'tool-cursor': 'cursor',
+            'tool-line': 'horizontal_line',
+            'tool-rect': 'rectangle',
+            'tool-long': 'long_position',
+            'tool-short': 'short_position'
+        };
+        
+        Object.keys(tools).forEach(btnId => {
+            document.getElementById(btnId).addEventListener('click', () => {
+                activeTool = tools[btnId];
+                updateToolbarUI();
+            });
+        });
+        
+        document.getElementById('tool-delete').addEventListener('click', deleteSelectedFigure);
+        document.getElementById('tool-clear').addEventListener('click', clearAllFigures);
+        
+        function updateToolbarUI() {
+            Object.keys(tools).forEach(btnId => {
+                const btn = document.getElementById(btnId);
+                if (tools[btnId] === activeTool) {
+                    btn.classList.add('active');
+                } else {
+                    btn.classList.remove('active');
+                }
+            });
+
+            if (activeTool !== 'cursor') {
+                interactionLayer.style.pointerEvents = 'auto';
+                interactionLayer.style.cursor = 'crosshair';
+            } else {
+                interactionLayer.style.pointerEvents = 'none';
+                interactionLayer.style.cursor = 'default';
+            }
+        }
+        
+        setTimeout(resizeCanvas, 50);
         console.log('✅ Chart initialized');
     </script>
 </body>

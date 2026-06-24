@@ -1,3 +1,4 @@
+# name: chart_widget.py
 import json
 import os
 from PyQt5.QtWebEngineWidgets import QWebEngineView
@@ -18,259 +19,23 @@ class ChartWidget(QWidget):
         layout.addWidget(self.browser)
         
         html_path = os.path.join(os.path.dirname(__file__), 'resources', 'chart_template.html')
-        os.makedirs(os.path.dirname(html_path), exist_ok=True)
-        self.create_default_html(html_path)
-        
+        # Проверяем, существует ли файл
+        if not os.path.exists(html_path):
+            # Если нет - создаем базовый или копируем из другого места
+            print(f"⚠️ Файл {html_path} не найден!")
+            # Создаем минимальный HTML
+            os.makedirs(os.path.dirname(html_path), exist_ok=True)
+            self.create_default_html(html_path)
+        # Используем существующий файл
         self.browser.setUrl(QUrl.fromLocalFile(html_path))
+
         self.browser.page().loadFinished.connect(self._on_loaded)
         
         self._loaded = False
         self._pending_data = None
         self._pending_append = None
         
-    def create_default_html(self, path):
-        html_content = """<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <title>Chart</title>
-    <style>
-        body { margin: 0; padding: 0; background: #1e222d; overflow: hidden; }
-        #chart-container { width: 100vw; height: 100vh; }
-    </style>
-</head>
-<body>
-    <div id="chart-container"></div>
-    <script src="https://unpkg.com/lightweight-charts@4.0.0/dist/lightweight-charts.standalone.production.js"></script>
-    <script>
-        const chart = LightweightCharts.createChart(document.getElementById('chart-container'), {
-            width: document.getElementById('chart-container').clientWidth,
-            height: document.getElementById('chart-container').clientHeight,
-            layout: { 
-                background: { color: '#1e222d' }, 
-                textColor: '#d1d4dc' 
-            },
-            grid: { 
-                vertLines: { color: '#2a2e39' }, 
-                horzLines: { color: '#2a2e39' } 
-            },
-            timeScale: { 
-                borderColor: '#2a2e39', 
-                timeVisible: true, 
-                secondsVisible: false,
-                fixLeftEdge: true,    // Запрещаем скроллить левее данных
-                fixRightEdge: false,  // РАЗРЕШАЕМ пустоту справа (будущее)
-            },
-            rightPriceScale: {
-                borderColor: '#2a2e39',
-            },
-            handleScroll: true,
-            handleScale: true,
-        });
-        
-        const series = chart.addCandlestickSeries({
-            upColor: '#26a69a',
-            downColor: '#ef5350',
-            borderDownColor: '#ef5350',
-            borderUpColor: '#26a69a',
-            wickDownColor: '#ef5350',
-            wickUpColor: '#26a69a',
-        });
-        
-        let fullData = [];
-        let isDataLoaded = false;
-        let lastShowCount = 300;
-        let totalDataLength = 0;
-        
-        function updateChart(data, resetView) {
-            if (!data || data.length === 0) {
-                console.log('⚠️ No data to display');
-                return;
-            }
-            
-            // Сохраняем видимый диапазон перед обновлением данных
-            const visibleRange = chart.timeScale().getVisibleLogicalRange();
-            const oldLength = fullData.length;
-            
-            fullData = data.map(item => ({
-                time: Math.floor(item.time / 1000),
-                open: item.open,
-                high: item.high,
-                low: item.low,
-                close: item.close,
-            }));
-            
-            totalDataLength = fullData.length;
-            isDataLoaded = true;
-            console.log('📊 Data loaded:', fullData.length, 'candles');
-            
-            series.setData(fullData);
-            
-            // Если требуется жесткий сброс вида или данных еще не было
-            if (resetView || oldLength === 0 || !visibleRange) {
-                showLastBars(lastShowCount);
-            } else {
-                const diff = totalDataLength - oldLength;
-                
-                // Проверяем, смотрел ли пользователь на правую границу графика (включая пустоту справа)
-                if (visibleRange.to >= oldLength - 1) {
-                    // Сдвигаем диапазон на разницу свечей, сохраняя ПУСТОТУ и масштаб
-                    chart.timeScale().setVisibleLogicalRange({
-                        from: visibleRange.from + diff,
-                        to: visibleRange.to + diff
-                    });
-                } else {
-                    // Если пользователь залез в историю, то фиксируем его экран на месте
-                    chart.timeScale().setVisibleLogicalRange({
-                        from: visibleRange.from,
-                        to: visibleRange.to
-                    });
-                }
-            }
-        }
-        
-        function appendData(newData) {
-            if (!newData || newData.length === 0) return;
-            
-            const newCandles = newData.map(item => ({
-                time: Math.floor(item.time / 1000),
-                open: item.open,
-                high: item.high,
-                low: item.low,
-                close: item.close,
-            }));
-            
-            const allData = [...newCandles, ...fullData];
-            
-            const uniqueData = [];
-            const timeSet = new Set();
-            for (let i = allData.length - 1; i >= 0; i--) {
-                if (!timeSet.has(allData[i].time)) {
-                    timeSet.add(allData[i].time);
-                    uniqueData.unshift(allData[i]);
-                }
-            }
-            
-            fullData = uniqueData;
-            totalDataLength = fullData.length;
-            
-            console.log('📊 Appended data, total:', fullData.length, 'candles');
-            
-            const visibleRange = chart.timeScale().getVisibleLogicalRange();
-            
-            series.setData(fullData);
-            
-            if (visibleRange) {
-                const from = visibleRange.from + (newCandles.length);
-                const to = visibleRange.to + (newCandles.length);
-                chart.timeScale().setVisibleLogicalRange({ 
-                    from: Math.max(0, from), 
-                    to: Math.min(totalDataLength, to) 
-                });
-            }
-        }
-        
-        function showLastBars(count) {
-            if (!isDataLoaded || fullData.length === 0) return;
-            
-            lastShowCount = count;
-            const total = fullData.length;
-            const barsToShow = Math.min(count, total);
-            
-            if (total > 0) {
-                chart.timeScale().setVisibleLogicalRange({
-                    from: Math.max(0, total - barsToShow),
-                    to: total
-                });
-                console.log('📊 Showing last', barsToShow, 'bars (total:', total, ')');
-            }
-        }
-        
-        function setCurrentTime(timestamp) {
-            if (!isDataLoaded || fullData.length === 0) return;
-            
-            const timeInSeconds = Math.floor(timestamp / 1000);
-            
-            let index = -1;
-            for (let i = 0; i < fullData.length; i++) {
-                if (fullData[i].time >= timeInSeconds) {
-                    index = i;
-                    break;
-                }
-            }
-            
-            if (index === -1) index = fullData.length - 1;
-            
-            const total = fullData.length;
-            const halfBars = Math.floor(lastShowCount / 2);
-            
-            let from = Math.max(0, index - halfBars);
-            let to = Math.min(total, index + halfBars);
-            
-            chart.timeScale().setVisibleLogicalRange({ from: from, to: to });
-            console.log('📍 Set time to index:', index);
-        }
-        
-        function fitContent() {
-            if (!isDataLoaded || fullData.length === 0) return;
-            chart.timeScale().fitContent();
-        }
-        
-        function setTimeframe(tf) { 
-            console.log('TF changed:', tf);
-            setTimeout(function() {
-                showLastBars(lastShowCount);
-            }, 100);
-        }
-        
-        function getVisibleRange() {
-            return chart.timeScale().getVisibleLogicalRange();
-        }
-        
-        function setMarkers(markers) {
-            if (markers && markers.length > 0) {
-                series.setMarkers(markers);
-            } else {
-                series.setMarkers([]);
-            }
-        }
-        
-        // ПОЛНОСТЬЮ ОТКЛЮЧАЕМ АВТОПОДГРУЗКУ ПРИ ПЕРЕТАСКИВАНИИ МЫШЬЮ
-        function checkAndLoadMore() {
-            return false;
-        }
-        
-        window.updateChart = updateChart;
-        window.appendData = appendData;
-        window.fitContent = fitContent;
-        window.setCurrentTime = setCurrentTime;
-        window.setTimeframe = setTimeframe;
-        window.getVisibleRange = getVisibleRange;
-        window.showLastBars = showLastBars;
-        window.setMarkers = setMarkers;
-        window.checkAndLoadMore = checkAndLoadMore;
-        window.chart = chart;
-        window.series = series;
-        
-        window.pyQtBridge = {
-            loadMoreData: null
-        };
-        
-        window.addEventListener('resize', function() {
-            chart.resize(
-                document.getElementById('chart-container').clientWidth,
-                document.getElementById('chart-container').clientHeight
-            );
-        });
-        
-        console.log('✅ Chart initialized');
-    </script>
-</body>
-</html>"""
-        with open(path, 'w', encoding='utf-8') as f:
-            f.write(html_content)
-        print(f"✅ HTML шаблон создан: {path}")
-    
+   
     def _on_loaded(self):
         self._loaded = True
         print("✅ График загружен")
@@ -395,3 +160,5 @@ class ChartWidget(QWidget):
         else:
             js_code = "if (window.setMarkers) { window.setMarkers([]); }"
         self.browser.page().runJavaScript(js_code)
+
+    
