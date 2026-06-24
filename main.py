@@ -91,6 +91,48 @@ class MainWindow(QMainWindow):
         
         top_panel.addStretch()
         
+        # --- Панель торговли ---
+        top_panel.addWidget(QLabel("|"))
+        top_panel.addWidget(QLabel("📈 Торговля:"))
+
+        # Кнопка Long
+        self.btn_long = QPushButton("📈 Long")
+        self.btn_long.setFixedSize(70, 30)
+        self.btn_long.setStyleSheet("background-color: #2e7d32; color: white; font-weight: bold;")
+        self.btn_long.clicked.connect(lambda: self.on_trade_preview('long'))
+        top_panel.addWidget(self.btn_long)
+
+        # Кнопка Short
+        self.btn_short = QPushButton("📉 Short")
+        self.btn_short.setFixedSize(70, 30)
+        self.btn_short.setStyleSheet("background-color: #c62828; color: white; font-weight: bold;")
+        self.btn_short.clicked.connect(lambda: self.on_trade_preview('short'))
+        top_panel.addWidget(self.btn_short)
+
+        # Кнопка Отмена
+        self.btn_cancel_preview = QPushButton("✕")
+        self.btn_cancel_preview.setFixedSize(30, 30)
+        self.btn_cancel_preview.setToolTip("Отменить примерку")
+        self.btn_cancel_preview.clicked.connect(self.on_cancel_preview)
+        self.btn_cancel_preview.setEnabled(False)
+        top_panel.addWidget(self.btn_cancel_preview)
+
+        # Кнопка Разместить
+        self.btn_execute = QPushButton("✅ Разместить")
+        self.btn_execute.setFixedSize(90, 30)
+        self.btn_execute.setStyleSheet("background-color: #1976d2; color: white; font-weight: bold;")
+        self.btn_execute.clicked.connect(self.on_execute_trade)
+        self.btn_execute.setEnabled(False)
+        top_panel.addWidget(self.btn_execute)
+
+        top_panel.addWidget(QLabel("|"))
+
+        # Инфо о примерке
+        self.preview_info_label = QLabel("")
+        self.preview_info_label.setFont(QFont("Arial", 9))
+        self.preview_info_label.setStyleSheet("color: #aaaaaa;")
+        top_panel.addWidget(self.preview_info_label)
+
         # Информация о данных
         self.data_info_label = QLabel("Свечей: 0 | Период: -")
         self.data_info_label.setFont(QFont("Arial", 9))
@@ -580,7 +622,66 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         self.on_stop()
         event.accept()
+    def on_trade_preview(self, position_type):
+        """Создает примерку позиции"""
+        if self.full_data is None or self.full_data.empty:
+            QMessageBox.warning(self, "Ошибка", "Нет данных для торговли")
+            return
+        
+        # Берем текущую цену (последняя видимая свеча)
+        current_price = self.full_data.iloc[self.current_index]['close']
+        
+        # Если нет preview - создаем
+        if not hasattr(self, 'preview'):
+            from trade_preview import TradePreview
+            self.preview = TradePreview(self.chart)
+        
+        # Создаем примерку
+        info = self.preview.create_preview(current_price, position_type)
+        
+        if info:
+            self.btn_cancel_preview.setEnabled(True)
+            self.btn_execute.setEnabled(True)
+            self.btn_long.setEnabled(False)
+            self.btn_short.setEnabled(False)
+            self.update_preview_info(info)
 
+    def on_cancel_preview(self):
+        """Отменяет примерку"""
+        if hasattr(self, 'preview'):
+            self.preview.cancel()
+        
+        self.btn_cancel_preview.setEnabled(False)
+        self.btn_execute.setEnabled(False)
+        self.btn_long.setEnabled(True)
+        self.btn_short.setEnabled(True)
+        self.preview_info_label.setText("")
+
+    def on_execute_trade(self):
+        """Размещает сделку из примерки"""
+        if not hasattr(self, 'preview') or not self.preview.is_active:
+            return
+        
+        # TODO: передать баланс менеджер
+        # result = self.preview.execute(self.balance_manager)
+        
+        # Временно просто закрываем
+        self.on_cancel_preview()
+        self.status_label.setText("✅ Сделка размещена!")
+
+    def update_preview_info(self, info):
+        """Обновляет информационную панель примерки"""
+        text = (f"{info['type']} | Entry: ${info['entry']:.2f} | "
+                f"SL: ${info['stop_loss']:.2f} | TP: ${info['take_profit']:.2f} | "
+                f"Risk: ${info['risk_usd']:.2f} | Reward: ${info['reward_usd']:.2f} | "
+                f"RR: 1:{info['rr_ratio']:.2f}")
+        
+        self.preview_info_label.setText(text)
+        
+        if info['type'] == 'LONG':
+            self.preview_info_label.setStyleSheet("color: #4CAF50; font-weight: bold;")
+        else:
+            self.preview_info_label.setStyleSheet("color: #f44336; font-weight: bold;")
 def main():
     from PyQt5.QtWidgets import QApplication
     app = QApplication(sys.argv)
