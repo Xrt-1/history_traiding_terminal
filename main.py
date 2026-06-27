@@ -252,10 +252,10 @@ class MainWindow(QMainWindow):
         
         # Кнопки навигации
         nav_buttons = [
-            ("◀◀", self.go_to_begin, "В начало"),      # или «
-            ("◀", self.on_step_back, "Шаг назад"),      # или ‹
-            ("▶", self.on_step_forward, "Шаг вперед"),  # или ›
-            ("▶▶", self.go_to_end, "В конец")           # или »
+            ("◀◀", self.go_to_begin, "В начало"),      
+            ("◀", self.on_step_back, "Шаг назад"),      
+            ("▶", self.on_step_forward, "Шаг вперед"),  
+            ("▶▶", self.go_to_end, "В конец")          
         ]
         for icon, func, tip in nav_buttons:
             btn = ModernButton(icon)
@@ -452,17 +452,24 @@ class MainWindow(QMainWindow):
             self.load_data(symbol)
     
     def on_tf_changed(self, tf):
+        """Переключение таймфрейма с сохранением процента позиции"""
         if tf == self.current_tf:
             return
         
+        # 1. Запоминаем текущую позицию в процентах
+        position_ratio = 0.0
         if self.full_data is not None and not self.full_data.empty:
-            idx = min(self.current_index, len(self.full_data) - 1)
-            current_time = self.full_data.iloc[idx]['time']
-            self.current_position_ms = int(current_time.timestamp() * 1000)
+            total_bars = len(self.full_data)
+            if total_bars > 0:
+                current_idx = min(self.current_index, total_bars - 1)
+                position_ratio = current_idx / total_bars
+                print(f"📊 Сохраняем позицию: {position_ratio:.2%} ({current_idx}/{total_bars})")
         
+        # 2. Меняем таймфрейм
         self.current_tf = tf
         
         if self.aggregator is not None:
+            # 3. Агрегируем данные
             self.full_data = self.aggregator.aggregate(tf)
             
             if self.full_data.empty:
@@ -472,37 +479,32 @@ class MainWindow(QMainWindow):
             
             total_bars = len(self.full_data)
             
-            if self.current_position_ms is not None:
-                new_idx = self.find_nearest_index(self.current_position_ms)
+            # 4. Вычисляем новую позицию по проценту
+            if total_bars > 0:
+                # Базовый расчет
+                new_idx = int(position_ratio * total_bars)
                 
-                target_time = pd.to_datetime(self.current_position_ms, unit='ms')
-                new_time = self.full_data.iloc[new_idx]['time']
-                time_diff = abs((new_time - target_time).total_seconds() / 3600)
-                
-                if time_diff > 48:
-                    if total_bars > 300:
-                        new_idx = total_bars - 300
-                    else:
-                        new_idx = 0
-                elif new_idx >= total_bars:
+                # Корректировка для крайних позиций
+                if position_ratio >= 0.99:  # Были почти в конце
                     new_idx = total_bars - 1
-                elif new_idx < 0:
+                elif position_ratio <= 0.01:  # Были почти в начале
                     new_idx = 0
-            else:
-                if total_bars > 300:
-                    new_idx = total_bars - 300
                 else:
-                    new_idx = 0
+                    # Ограничиваем, чтобы не выйти за границы
+                    new_idx = max(0, min(new_idx, total_bars - 1))
+            else:
+                new_idx = 0
             
             self.current_index = new_idx
             
+            # 5. Обновляем интерфейс
             self.update_info()
             self.update_slider()
             self.update_chart(reset_view=True)
             self.chart.set_timeframe(tf)
             
             self.status_label.setText(f"✅ {self.current_symbol} · {tf} · {total_bars} свечей")
-
+            print(f"📊 Переключено на {tf}: позиция {new_idx}/{total_bars} ({position_ratio:.2%})")
     def find_nearest_index(self, timestamp_ms: int) -> int:
         if self.full_data is None or self.full_data.empty:
             return 0

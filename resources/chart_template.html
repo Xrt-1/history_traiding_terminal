@@ -630,12 +630,18 @@
         // Подписка на обновление масштаба и скролла графика (БЕЗ краша priceScale)
         chart.timeScale().subscribeVisibleLogicalRangeChange(() => requestAnimationFrame(drawAll));
         
-        // --- ОБРАБОТКА ДВИЖЕНИЯ МЫШИ (Глобальная через document) ---
+        // Флаг, указывающий, что мышь зажата на фигуре
+        let isDraggingFigure = false;
+        let dragStartX = 0;
+        let dragStartY = 0;
+    
+        // --- ОБРАБОТКА ДВИЖЕНИЯ МЫШИ (УЛУЧШЕННАЯ) ---
         document.addEventListener('mousemove', (e) => {
             const rect = interactionLayer.getBoundingClientRect();
             const mouseX = e.clientX - rect.left;
             const mouseY = e.clientY - rect.top;
             
+            // Если перетаскиваем фигуру - обновляем ее
             if (draggedFigure) {
                 const currentPrice = series.coordinateToPrice(mouseY);
                 const currentTime = xToTime(mouseX);
@@ -645,6 +651,7 @@
                 const deltaPrice = currentPrice - startState.mousePrice;
                 const deltaTime = currentTime - startState.mouseTime;
                 
+                // ... обновление фигуры (без изменений) ...
                 if (draggedFigure.type === 'horizontal_line') {
                     draggedFigure.price = currentPrice;
                 } 
@@ -722,10 +729,15 @@
             }
         });
         
+        // --- ОБРАБОТКА НАЖАТИЯ МЫШИ (УЛУЧШЕННАЯ) ---
         interactionLayer.addEventListener('mousedown', (e) => {
             const rect = interactionLayer.getBoundingClientRect();
             const mouseX = e.clientX - rect.left;
             const mouseY = e.clientY - rect.top;
+            
+            // Запоминаем начальную позицию для определения перетаскивания
+            dragStartX = mouseX;
+            dragStartY = mouseY;
             
             if (activeTool !== 'cursor') {
                 const price = series.coordinateToPrice(mouseY);
@@ -742,12 +754,20 @@
             
             const target = findTarget(mouseX, mouseY);
             if (target) {
+                // Клик по фигуре - начинаем перетаскивание
                 figures.forEach(f => f.selected = false);
                 target.figure.selected = true;
                 selectedFigureId = target.figure.id;
                 
                 draggedFigure = target.figure;
                 draggedPart = target.part;
+                
+                // БЛОКИРУЕМ перетаскивание графика через Lightweight Charts
+                // Отключаем взаимодействие с графиком пока перетаскиваем фигуру
+                chart.applyOptions({
+                    handleScroll: false,
+                    handleScale: false
+                });
                 
                 startState = {
                     mousePrice: series.coordinateToPrice(mouseY),
@@ -763,6 +783,13 @@
                 };
                 drawAll();
             } else {
+                // Клик по пустому месту - разрешаем перетаскивание графика
+                chart.applyOptions({
+                    handleScroll: true,
+                    handleScale: true
+                });
+                
+                // Снимаем выделение
                 let changed = false;
                 figures.forEach(f => {
                     if (f.selected) {
@@ -777,11 +804,34 @@
             }
         });
         
-        window.addEventListener('mouseup', () => {
+        // --- ОБРАБОТКА ОТПУСКАНИЯ МЫШИ (УЛУЧШЕННАЯ) ---
+        window.addEventListener('mouseup', (e) => {
+            // Если перетаскивали фигуру - включаем обратно скролл графика
+            if (draggedFigure) {
+                chart.applyOptions({
+                    handleScroll: true,
+                    handleScale: true
+                });
+            }
+            
+            // Сбрасываем флаги перетаскивания
             draggedFigure = null;
             draggedPart = null;
+            isDraggingFigure = false;
         });
         
+        // --- ДОБАВЛЯЕМ ОБРАБОТЧИК ДЛЯ КОЛЕСИКА МЫШИ (НЕ ДАЕМ ФИГУРАМ МЕНЯТЬСЯ) ---
+        interactionLayer.addEventListener('wheel', (e) => {
+            // Если наведены на фигуру, но не перетаскиваем ее - позволяем зуммировать график
+            // Ничего не делаем, просто пропускаем событие дальше
+        });
+        
+        // --- НЕБОЛЬШОЙ FIX: при двойном клике сбрасываем выделение ---
+        interactionLayer.addEventListener('dblclick', (e) => {
+            figures.forEach(f => f.selected = false);
+            selectedFigureId = null;
+            drawAll();
+        });
         function createFigure(tool, price, time) {
             figures.forEach(f => f.selected = false);
             const id = 'fig_' + Date.now();
